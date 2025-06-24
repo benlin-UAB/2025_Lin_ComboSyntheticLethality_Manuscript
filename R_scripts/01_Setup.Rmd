@@ -1,0 +1,139 @@
+---
+title: "2025 Lin et al. Supplemental Methods"
+author: "Benjamin Lin"
+editor: "C Ryan Miller"
+date: '`r format(Sys.time(), "Last modified: %d %b %Y")`'
+output:
+  html_document:
+    toc: yes
+    toc_float: yes
+    toc_depth: 6 
+    code_folding: hide
+layout: page
+subtitle: "C Ryan Miller Lab @ UAB"
+affiliation: UAB
+editor_options: 
+  chunk_output_type: inline
+  markdown: 
+    wrap: sentence
+---
+
+This R Markdown (RMD) file sets up the downstream analysis R environment for the 2025 Lin manuscript. 
+
+# Setup
+This code section starts script timing, loads R libraries, sets file directory paths and seeds for analysis, and imports bm_hEGFR orthologous genes between mouse and human (dataframe with matched ensembl gene_id, mouse gene names, and human gene names). 
+
+Script Timing Start
+```{r}
+ptm <- proc.time()
+```
+
+Docker mount directory
+```{r}
+Data <- paste0("/Data/")
+```
+
+Load Libraries
+```{r, message = FALSE}
+library(tibble)
+library(rtracklayer)
+library(biomaRt)
+library(dplyr)
+library(Biobase)
+library(tximport)
+library(DESeq2)
+library(ggplot2)
+library(scales)
+library(grid)
+library(gridExtra)
+library(cowplot)
+library(colorRamps)
+library(RColorBrewer)
+library(pheatmap)
+library(tidyverse)
+library(BiocParallel)
+library(AnnotationDbi)
+library(org.Hs.eg.db)
+library(EnhancedVolcano)
+library(gplots)
+library(grDevices)
+library(rmarkdown)
+library(RSQLite)
+library(GSVA)
+library(msigdbr)
+library(UpSetR)
+library(ComplexHeatmap)
+library(vsn)
+library(gprofiler2)
+library(ggpubr)
+library(PCAtools)
+library(DEP)
+library(limma)
+library(parallel)
+library(gtools)
+library(cluster)
+library(factoextra)
+```
+
+Set.Seed
+```{r}
+# This will set the random number generator
+set.seed(888)
+```
+
+bm_hEGFR: Human to mouse genes translation matrix
+This object will be used for mouse and human gene translation.
+```{r}
+bm_hEGFR <- readRDS(paste0(Data,"Input/Figures/bm_hEGFR.rds"))
+```
+
+## Directories
+```{r}
+dir.create(paste0(Data,"Output/"))
+dir.create(paste0(Data,"Graphs/"))
+```
+
+## Generate kinases.anno
+```{r}
+# 201006_composite_kinases has 16 extra kinases not originally present in 210706_uniprot... so they were added by hand to match
+# 210706_uniprot has 11 kinases not present in 201016_composite but they're not important (sperm motility, pseudogenes, etc. so not adding them to kinases or kinases.anno)
+#final number of kinases to proceed: 558
+
+kinases <- read.csv("/Data/Input/MIB-MS/201006_composite_kinases.csv", header = TRUE, fileEncoding="UTF-8-BOM")
+
+kinases.anno <- kinases
+
+kinases.uniprot <- read.csv("/Data/Input/MIB-MS/210706_uniprot_mouse_kinases_with_hEGFR.csv", header = TRUE, fileEncoding="UTF-8-BOM")
+
+kinases.uniprot <- subset(kinases.uniprot, kinases.uniprot$Status=="reviewed")
+
+kinases.anno <- left_join(kinases.anno, kinases.uniprot, by = c("Mouse_symbol" = "gene" ))
+
+setdiff(kinases.uniprot$gene, kinases.anno$Mouse_symbol)
+
+# kinases.anno and kinases.uniprot are 11 different, but it's okay
+
+kinases.anno <- subset(kinases.anno, kinases.anno$Status=="reviewed")
+ 
+setdiff(kinases$Mouse_symbol, kinases.anno$Mouse_symbol)
+ 
+isUnique <- function(vector) {
+  return(!any(duplicated(vector)))
+}
+
+isUnique(kinases$Mouse_symbol)
+
+isUnique(kinases.anno$Mouse_symbol)
+```
+
+
+# Session Info
+```{r}
+sessionInfo()
+```
+
+# Timing End
+```{r}
+proc.time() - ptm
+```
+

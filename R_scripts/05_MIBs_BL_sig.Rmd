@@ -1,0 +1,957 @@
+---
+title: "05_MIBs_BL_sig"
+author: "Benjamin Lin"
+editor: "C Ryan Miller"
+date: '`r format(Sys.time(), "Last modified: %d %b %Y")`'
+output:
+  html_document:
+    toc: yes
+    toc_float: yes
+    toc_depth: 6 
+    code_folding: hide
+layout: page
+subtitle: "C Ryan Miller Lab @ UAB"
+affiliation: UAB
+editor_options: 
+  chunk_output_type: inline
+  markdown: 
+    wrap: sentence
+---
+
+This R Markdown (RMD) file performs exploratory data analysis (EDA) for the 2025 Lin manuscript.
+
+Script Timing Start
+```{r}
+ptm <- proc.time()
+```
+
+## Variables
+```{r}
+# adjusted pvalue
+qval <- 0.05
+pval <- 0.05
+lfc <- .5
+
+# Use max of 4 cores if available.
+ncore <- ifelse((detectCores()-2)>=4,4,detectCores()-2)
+
+# Bootstrapped values
+# we used B = 10 for demo. Recommended value is ~500. Number of bootstrapped values
+BS_N <- 10
+```
+
+Set.Seed
+```{r}
+# This will set the random number generator
+set.seed(888)
+```
+
+# MIBs_TMT_Clustering data
+## Directories
+```{r}
+# output directory
+output_dir <- paste0(Data, "Output/MIB_BL_sig/")
+dir.create(paste0(output_dir))
+
+# Graphs
+graph_dir <- paste0(Data, "Graphs/MIB_BL_sig/")
+dir.create(paste0(graph_dir))
+```
+
+
+# Import Limma Res ss
+```{r}
+DEP_Bl_Res_ss_limma_res_padj <- read.csv(paste0(Data,"/Output/MIB-BL/DEP_Bl_Res_ss/Limma_res/","All_coi_padj.csv"), row.names = 1)
+
+# Extract significant genes
+E4_sig_genes <- row.names(subset(DEP_Bl_Res_ss_limma_res_padj, DEP_Bl_Res_ss_limma_res_padj$adj.P.Val_E4.starve.CEv3.starve<0.05))
+E5_sig_genes <- row.names(subset(DEP_Bl_Res_ss_limma_res_padj, DEP_Bl_Res_ss_limma_res_padj$adj.P.Val_E5.starve.CEv3.starve<0.05))
+G1_sig_genes <- row.names(subset(DEP_Bl_Res_ss_limma_res_padj, DEP_Bl_Res_ss_limma_res_padj$adj.P.Val_G1.starve.CEv3.starve<0.05))
+G5_sig_genes <- row.names(subset(DEP_Bl_Res_ss_limma_res_padj, DEP_Bl_Res_ss_limma_res_padj$adj.P.Val_G5.starve.CEv3.starve<0.05))
+G8_sig_genes <- row.names(subset(DEP_Bl_Res_ss_limma_res_padj, DEP_Bl_Res_ss_limma_res_padj$adj.P.Val_G8.starve.CEv3.starve<0.05))
+G12_sig_genes <- row.names(subset(DEP_Bl_Res_ss_limma_res_padj, DEP_Bl_Res_ss_limma_res_padj$adj.P.Val_G12.starve.CEv3.starve<0.05))
+
+
+# Convert to list
+DEP_Bl_Res_ss_sigGenes_ls <- list(
+  E4=E4_sig_genes,
+  E5=E5_sig_genes,
+  G1=G1_sig_genes,
+  G5=G5_sig_genes,
+  G8=G8_sig_genes,
+  G12=G12_sig_genes
+)
+
+# Remove hEGFR
+DEP_Bl_Res_ss_sigGenes_ls <- lapply(DEP_Bl_Res_ss_sigGenes_ls, function(x) subset(x,!x=="hEGFR"))
+```
+
+
+## Upset Plot ss
+```{r}
+# Directories 
+dir.create(paste0(output_dir,"DEP_Bl_Res_ss"))
+output_dir_upset <- paste0(output_dir,"DEP_Bl_Res_ss/")
+dir.create(paste0(graph_dir,"DEP_Bl_Res_ss"))
+graph_dir_upset <- paste0(graph_dir,"DEP_Bl_Res_ss/")
+
+
+# Convert list to binary matrix
+Upset_matrix <- ComplexHeatmap::list_to_matrix(DEP_Bl_Res_ss_sigGenes_ls)
+
+# Save Upset_matrix
+write.csv(Upset_matrix, file = paste0(output_dir_upset, "FullUpset_matrix",".csv"))
+
+# convert list to combination matrix
+combo_matrix <- ComplexHeatmap::make_comb_mat(Upset_matrix)
+
+# Color by intersection
+intersection_degree <- comb_degree(combo_matrix)
+comb_col <- ifelse(intersection_degree > 1, "blue", "red")
+
+# Generate upset plot
+upset_plot <- ComplexHeatmap::UpSet(combo_matrix, comb_col = comb_col,
+                        row_names_gp =gpar(fontsize = 12) ,
+                        top_annotation = upset_top_annotation(
+                          combo_matrix, 
+                          add_numbers = TRUE, 
+                          numbers_gp = gpar(fontsize = 11),
+                          numbers_rot=0,  
+                          annotation_name_rot = 90, 
+                          axis_param=list (gp = gpar(fontsize = 11)),
+                          annotation_name_gp= gpar(fontsize = 14)),
+                        right_annotation = upset_right_annotation(
+                          combo_matrix, 
+                          add_numbers = TRUE, 
+                          numbers_gp = gpar(fontsize = 11),
+                          numbers_rot=0,
+                          axis_param=list (gp = gpar(fontsize = 11)),
+                          annotation_name_gp= gpar(fontsize = 14)),
+                        pt_size = unit(5, "pt"))
+
+upset_plot
+
+# Save upset_plot
+pdf(file=paste0(graph_dir_upset, "UpsetFull" , ".pdf"))
+draw(upset_plot)
+dev.off()
+
+# Combination matrix
+combo_matrix
+comb_name(combo_matrix)
+
+# Extract all from upset plot
+upset_genes_ls <- list()
+for(i in seq_along(comb_name(combo_matrix))){
+  upset_genes_ls[[paste0((set_name(combo_matrix)["1"==strsplit(comb_name(combo_matrix)[i],"")[[1]]])[1],"_",(set_name(combo_matrix)["1"==strsplit(comb_name(combo_matrix)[i],"")[[1]]])[2],"_",(set_name(combo_matrix)["1"==strsplit(comb_name(combo_matrix)[i],"")[[1]]])[3],"_",(set_name(combo_matrix)["1"==strsplit(comb_name(combo_matrix)[i],"")[[1]]])[4],"_",(set_name(combo_matrix)["1"==strsplit(comb_name(combo_matrix)[i],"")[[1]]])[5],"_",(set_name(combo_matrix)["1"==strsplit(comb_name(combo_matrix)[i],"")[[1]]])[6])]] <-
+    extract_comb(combo_matrix,comb_name(combo_matrix)[i])
+}
+
+# Convert to DF
+upset_genes_df <- do.call(cbind, lapply(upset_genes_ls, function(x) c(x, rep(NA, max(sapply(upset_genes_ls, length)) - length(x)))))
+
+
+# Save genes
+write.csv(upset_genes_df, file = paste0(output_dir_upset,"upset_genes_df",".csv"))
+
+# Extract unique genes
+DEP_Bl_Res_ss_unique_genes <- c()
+for(i in (grep("NA_NA_NA_NA_NA",colnames(upset_genes_df)))){
+  DEP_Bl_Res_ss_unique_genes<- c(DEP_Bl_Res_ss_unique_genes,upset_genes_df[,i][!is.na( upset_genes_df[,i])])
+}
+
+# Subset unique genes DF
+DEP_Bl_Res_ss_unique_genes_df <- upset_genes_df[,colnames(upset_genes_df)[grep("NA_NA_NA_NA_NA",colnames(upset_genes_df))]]
+colnames(DEP_Bl_Res_ss_unique_genes_df) <- gsub("_NA_NA_NA_NA_NA","_ss",colnames(DEP_Bl_Res_ss_unique_genes_df))
+
+# Convert to list
+DEP_Bl_Res_ss_unique_genes_ls <- list()
+for (i in seq_along(colnames(DEP_Bl_Res_ss_unique_genes_df))){
+  DEP_Bl_Res_ss_unique_genes_ls[[colnames(DEP_Bl_Res_ss_unique_genes_df)[i]]] <-
+    c(DEP_Bl_Res_ss_unique_genes_df[,i][!is.na(DEP_Bl_Res_ss_unique_genes_df[,i])])
+}
+
+# Extract overlapping genes column names
+colnames(upset_genes_df)[(grep("NA_NA_NA_NA_NA",colnames(upset_genes_df), invert = T))]
+
+# Extract overlapping genes
+DEP_Bl_Res_ss_ol_genes <- c()
+for (i in (colnames(upset_genes_df)[(grep("NA_NA_NA_NA_NA",colnames(upset_genes_df), invert = T))])){
+  DEP_Bl_Res_ss_ol_genes <-
+    c(DEP_Bl_Res_ss_ol_genes,upset_genes_df[,i][!is.na( upset_genes_df[,i] )])
+  
+}
+```
+
+
+
+# Import Limma Res fs
+```{r}
+DEP_Bl_Res_fs_limma_res_padj <- read.csv(paste0(Data,"/Output/MIB-BL/DEP_Bl_Res_fs/Limma_res/","All_coi_padj.csv"), row.names = 1)
+
+# Extract significant genes
+E4_sig_genes <- row.names(subset(DEP_Bl_Res_fs_limma_res_padj, DEP_Bl_Res_fs_limma_res_padj$adj.P.Val_E4.full.CEv3.full<0.05))
+E5_sig_genes <- row.names(subset(DEP_Bl_Res_fs_limma_res_padj, DEP_Bl_Res_fs_limma_res_padj$adj.P.Val_E5.full.CEv3.full<0.05))
+G1_sig_genes <- row.names(subset(DEP_Bl_Res_fs_limma_res_padj, DEP_Bl_Res_fs_limma_res_padj$adj.P.Val_G1.full.CEv3.full<0.05))
+G5_sig_genes <- row.names(subset(DEP_Bl_Res_fs_limma_res_padj, DEP_Bl_Res_fs_limma_res_padj$adj.P.Val_G5.full.CEv3.full<0.05))
+G8_sig_genes <- row.names(subset(DEP_Bl_Res_fs_limma_res_padj, DEP_Bl_Res_fs_limma_res_padj$adj.P.Val_G8.full.CEv3.full<0.05))
+G12_sig_genes <- row.names(subset(DEP_Bl_Res_fs_limma_res_padj, DEP_Bl_Res_fs_limma_res_padj$adj.P.Val_G12.full.CEv3.full<0.05))
+
+
+# Convert to list
+DEP_Bl_Res_fs_sigGenes_ls <- list(
+  E4=E4_sig_genes,
+  E5=E5_sig_genes,
+  G1=G1_sig_genes,
+  G5=G5_sig_genes,
+  G8=G8_sig_genes,
+  G12=G12_sig_genes
+)
+
+# Remove hEGFR
+DEP_Bl_Res_fs_sigGenes_ls <- lapply(DEP_Bl_Res_fs_sigGenes_ls, function(x) subset(x,!x=="hEGFR"))
+```
+
+
+## Upset Plot fs
+```{r}
+# Directories 
+dir.create(paste0(output_dir,"DEP_Bl_Res_fs"))
+output_dir_upset <- paste0(output_dir,"DEP_Bl_Res_fs/")
+dir.create(paste0(graph_dir,"DEP_Bl_Res_fs"))
+graph_dir_upset <- paste0(graph_dir,"DEP_Bl_Res_fs/")
+
+
+# Convert list to binary matrix
+Upset_matrix <- ComplexHeatmap::list_to_matrix(DEP_Bl_Res_fs_sigGenes_ls)
+
+# Save Upset_matrix
+write.csv(Upset_matrix, file = paste0(output_dir_upset, "FullUpset_matrix",".csv"))
+
+# convert list to combination matrix
+combo_matrix <- ComplexHeatmap::make_comb_mat(Upset_matrix)
+
+# Color by intersection
+intersection_degree <- comb_degree(combo_matrix)
+comb_col <- ifelse(intersection_degree > 1, "blue", "red")
+
+
+# Generate upset plot
+upset_plot <- ComplexHeatmap::UpSet(combo_matrix, comb_col = comb_col,
+                        row_names_gp =gpar(fontsize = 12) ,
+                        top_annotation = upset_top_annotation(
+                          combo_matrix, 
+                          add_numbers = TRUE, 
+                          numbers_gp = gpar(fontsize = 11),
+                          numbers_rot=0,  
+                          annotation_name_rot = 90, 
+                          axis_param=list (gp = gpar(fontsize = 11)),
+                          annotation_name_gp= gpar(fontsize = 14)),
+                        right_annotation = upset_right_annotation(
+                          combo_matrix, 
+                          add_numbers = TRUE, 
+                          numbers_gp = gpar(fontsize = 11),
+                          numbers_rot=0,
+                          axis_param=list (gp = gpar(fontsize = 11)),
+                          annotation_name_gp= gpar(fontsize = 14)),
+                        pt_size = unit(5, "pt"))
+
+upset_plot
+
+# Save upset_plot
+pdf(file=paste0(graph_dir_upset, "UpsetFull" , ".pdf"))
+draw(upset_plot)
+dev.off()
+
+# Combination matrix
+combo_matrix
+comb_name(combo_matrix)
+
+# Extract all from upset plot
+upset_genes_ls <- list()
+for(i in seq_along(comb_name(combo_matrix))){
+  upset_genes_ls[[paste0((set_name(combo_matrix)["1"==strsplit(comb_name(combo_matrix)[i],"")[[1]]])[1],"_",(set_name(combo_matrix)["1"==strsplit(comb_name(combo_matrix)[i],"")[[1]]])[2],"_",(set_name(combo_matrix)["1"==strsplit(comb_name(combo_matrix)[i],"")[[1]]])[3],"_",(set_name(combo_matrix)["1"==strsplit(comb_name(combo_matrix)[i],"")[[1]]])[4],"_",(set_name(combo_matrix)["1"==strsplit(comb_name(combo_matrix)[i],"")[[1]]])[5],"_",(set_name(combo_matrix)["1"==strsplit(comb_name(combo_matrix)[i],"")[[1]]])[6])]] <-
+    extract_comb(combo_matrix,comb_name(combo_matrix)[i])
+}
+
+# Convert to DF
+upset_genes_df <- do.call(cbind, lapply(upset_genes_ls, function(x) c(x, rep(NA, max(sapply(upset_genes_ls, length)) - length(x)))))
+
+
+# Save genes
+write.csv(upset_genes_df, file = paste0(output_dir_upset,"upset_genes_df",".csv"))
+
+# Extract unique genes
+grep("NA_NA_NA_NA_NA",colnames(upset_genes_df))
+DEP_Bl_Res_fs_unique_genes <- c()
+for(i in (grep("NA_NA_NA_NA_NA",colnames(upset_genes_df)))){
+  DEP_Bl_Res_fs_unique_genes<- c(DEP_Bl_Res_fs_unique_genes,upset_genes_df[,i][!is.na( upset_genes_df[,i])])
+}
+
+# Subset unique genes DF
+DEP_Bl_Res_fs_unique_genes_df <- upset_genes_df[,colnames(upset_genes_df)[grep("NA_NA_NA_NA_NA",colnames(upset_genes_df))]]
+colnames(DEP_Bl_Res_fs_unique_genes_df) <- gsub("_NA_NA_NA_NA_NA","_fs",colnames(DEP_Bl_Res_fs_unique_genes_df))
+
+# Convert to list
+DEP_Bl_Res_fs_unique_genes_ls <- list()
+for (i in seq_along(colnames(DEP_Bl_Res_fs_unique_genes_df))){
+  DEP_Bl_Res_fs_unique_genes_ls[[colnames(DEP_Bl_Res_fs_unique_genes_df)[i]]] <-
+    c(DEP_Bl_Res_fs_unique_genes_df[,i][!is.na(DEP_Bl_Res_fs_unique_genes_df[,i])])
+}
+
+
+# Extract overlapping genes column names
+colnames(upset_genes_df)[(grep("NA_NA_NA_NA_NA",colnames(upset_genes_df), invert = T))]
+
+# Extract overlapping genes
+DEP_Bl_Res_fs_ol_genes <- c()
+for (i in (colnames(upset_genes_df)[(grep("NA_NA_NA_NA_NA",colnames(upset_genes_df), invert = T))])){
+  DEP_Bl_Res_fs_ol_genes <-
+    c(DEP_Bl_Res_fs_ol_genes,upset_genes_df[,i][!is.na( upset_genes_df[,i] )])
+
+}
+
+
+
+
+```
+
+# Cross B/W
+```{r}
+DEP_Bl_Res_fs_unique_genes_ls
+DEP_Bl_Res_ss_unique_genes_ls
+DEP_Bl_Res_fs_ol_genes
+DEP_Bl_Res_ss_ol_genes
+
+
+
+fs_unique <- c()
+for (i in seq_along(DEP_Bl_Res_fs_unique_genes_ls)){
+  genes <- c(DEP_Bl_Res_fs_unique_genes_ls[[i]])
+  fs_unique <- c(fs_unique,genes)
+}
+
+fs_ol <- c()
+for (i in seq_along(DEP_Bl_Res_fs_ol_genes)){
+  genes <- c(DEP_Bl_Res_fs_ol_genes[[i]])
+  fs_ol <- c(fs_ol,genes)
+}
+
+ss_unique <- c()
+for (i in seq_along(DEP_Bl_Res_ss_unique_genes_ls)){
+  genes <- c(DEP_Bl_Res_ss_unique_genes_ls[[i]])
+  ss_unique <- c(ss_unique,genes)
+}
+
+ss_ol <- c()
+for (i in seq_along(DEP_Bl_Res_ss_ol_genes)){
+  genes <- c(DEP_Bl_Res_ss_ol_genes[[i]])
+  ss_ol <- c(ss_ol,genes)
+}
+
+# Genes that intersect
+intersect(fs_unique,ss_ol)
+intersect(fs_ol,ss_unique)
+intersect(fs_unique,ss_unique)
+intersect(fs_ol,ss_ol)
+intersect_genes <- c(intersect(fs_unique,ss_ol),intersect(fs_ol,ss_unique) )
+
+cross_ls <- list(fs_unique=fs_unique,
+                 fs_ol=fs_ol,
+                 ss_unique=ss_unique,
+                 ss_ol=ss_ol)
+
+
+# Directories 
+dir.create(paste0(output_dir,"crossing"))
+output_dir_upset <- paste0(output_dir,"crossing/")
+dir.create(paste0(graph_dir,"crossing"))
+graph_dir_upset <- paste0(graph_dir,"crossing/")
+
+# Convert list to binary matrix
+Upset_matrix <- ComplexHeatmap::list_to_matrix(cross_ls)
+
+# Save Upset_matrix
+write.csv(Upset_matrix, file = paste0(output_dir_upset, "FullUpset_matrix",".csv"))
+
+# convert list to combination matrix
+combo_matrix <- ComplexHeatmap::make_comb_mat(Upset_matrix)
+
+# Color by intersection
+intersection_degree <- comb_degree(combo_matrix)
+comb_col <- ifelse(names(intersection_degree) %in% c("1001","0110"), "black", "purple")
+
+
+# Generate upset plot
+upset_plot <- ComplexHeatmap::UpSet(combo_matrix, comb_col = comb_col ,
+                        row_names_gp =gpar(fontsize = 12) ,
+                        top_annotation = upset_top_annotation(
+                          combo_matrix, 
+                          add_numbers = TRUE, 
+                          numbers_gp = gpar(fontsize = 11),
+                          numbers_rot=0,  
+                          annotation_name_rot = 90, 
+                          axis_param=list (gp = gpar(fontsize = 11)),
+                          annotation_name_gp= gpar(fontsize = 14)),
+                        right_annotation = upset_right_annotation(
+                          combo_matrix, 
+                          add_numbers = TRUE, 
+                          numbers_gp = gpar(fontsize = 11),
+                          numbers_rot=0,
+                          axis_param=list (gp = gpar(fontsize = 11)),
+                          annotation_name_gp= gpar(fontsize = 14)),
+                        pt_size = unit(5, "pt"))
+
+upset_plot
+
+# Save upset_plot
+pdf(file=paste0(graph_dir_upset, "UpsetFull" , ".pdf"))
+draw(upset_plot)
+dev.off()
+
+# Combination matrix
+combo_matrix
+comb_name(combo_matrix)
+
+# Extract all from upset plot
+upset_genes_ls <- list()
+for(i in seq_along(comb_name(combo_matrix))){
+  upset_genes_ls[[paste0((set_name(combo_matrix)["1"==strsplit(comb_name(combo_matrix)[i],"")[[1]]])[1],"_",(set_name(combo_matrix)["1"==strsplit(comb_name(combo_matrix)[i],"")[[1]]])[2],"_",(set_name(combo_matrix)["1"==strsplit(comb_name(combo_matrix)[i],"")[[1]]])[3],"_",(set_name(combo_matrix)["1"==strsplit(comb_name(combo_matrix)[i],"")[[1]]])[4])]] <-
+    extract_comb(combo_matrix,comb_name(combo_matrix)[i])
+}
+
+# Convert to DF
+upset_genes_df <- do.call(cbind, lapply(upset_genes_ls, function(x) c(x, rep(NA, max(sapply(upset_genes_ls, length)) - length(x)))))
+
+# Save genes
+write.csv(upset_genes_df, file = paste0(output_dir_upset,"upset_genes_df",".csv"))
+
+```
+
+
+# Overlap of unique 
+```{r}
+
+# These are genes that change in only 1 resistant line per serum condition
+DEP_Bl_Res_fs_unique_genes_ls
+DEP_Bl_Res_ss_unique_genes_ls
+
+# Filter out intersecting genes
+filt_DEP_Bl_Res_fs_unique_genes_ls <- lapply(DEP_Bl_Res_fs_unique_genes_ls, function(x) x[!(x %in% intersect_genes)])
+filt_DEP_Bl_Res_ss_unique_genes_ls <- lapply(DEP_Bl_Res_ss_unique_genes_ls, function(x) x[!(x %in% intersect_genes)])
+
+# Combine fs and ss genes
+DEP_Bl_Res_unique_genes_ls <- c(filt_DEP_Bl_Res_fs_unique_genes_ls,filt_DEP_Bl_Res_ss_unique_genes_ls)
+
+# Directories 
+dir.create(paste0(output_dir,"ss_fs_unique"))
+output_dir_upset <- paste0(output_dir,"ss_fs_unique/")
+dir.create(paste0(graph_dir,"ss_fs_unique"))
+graph_dir_upset <- paste0(graph_dir,"ss_fs_unique/")
+
+# Convert list to binary matrix
+Upset_matrix <- ComplexHeatmap::list_to_matrix(DEP_Bl_Res_unique_genes_ls)
+
+# Save Upset_matrix
+write.csv(Upset_matrix, file = paste0(output_dir_upset, "FullUpset_matrix",".csv"))
+
+# convert list to combination matrix
+combo_matrix <- ComplexHeatmap::make_comb_mat(Upset_matrix)
+
+# Generate upset plot
+upset_plot <- ComplexHeatmap::UpSet(combo_matrix, comb_col = "red" ,
+                        row_names_gp =gpar(fontsize = 12) ,
+                        top_annotation = upset_top_annotation(
+                          combo_matrix, 
+                          add_numbers = TRUE, 
+                          numbers_gp = gpar(fontsize = 11),
+                          numbers_rot=0,  
+                          annotation_name_rot = 90, 
+                          axis_param=list (gp = gpar(fontsize = 11)),
+                          annotation_name_gp= gpar(fontsize = 14)),
+                        right_annotation = upset_right_annotation(
+                          combo_matrix, 
+                          add_numbers = TRUE, 
+                          numbers_gp = gpar(fontsize = 11),
+                          numbers_rot=0,
+                          axis_param=list (gp = gpar(fontsize = 11)),
+                          annotation_name_gp= gpar(fontsize = 14)),
+                        pt_size = unit(5, "pt"))
+
+upset_plot
+
+# Save upset_plot
+pdf(file=paste0(graph_dir_upset, "UpsetFull" , ".pdf"))
+draw(upset_plot)
+dev.off()
+
+# Combination matrix
+combo_matrix
+comb_name(combo_matrix)
+
+# Extract all from upset plot
+upset_genes_ls <- list()
+for(i in seq_along(comb_name(combo_matrix))){
+  upset_genes_ls[[paste0((set_name(combo_matrix)["1"==strsplit(comb_name(combo_matrix)[i],"")[[1]]])[1],"_",(set_name(combo_matrix)["1"==strsplit(comb_name(combo_matrix)[i],"")[[1]]])[2],"_",(set_name(combo_matrix)["1"==strsplit(comb_name(combo_matrix)[i],"")[[1]]])[3],"_",(set_name(combo_matrix)["1"==strsplit(comb_name(combo_matrix)[i],"")[[1]]])[4],"_",(set_name(combo_matrix)["1"==strsplit(comb_name(combo_matrix)[i],"")[[1]]])[5],"_",(set_name(combo_matrix)["1"==strsplit(comb_name(combo_matrix)[i],"")[[1]]])[6],"_",(set_name(combo_matrix)["1"==strsplit(comb_name(combo_matrix)[i],"")[[1]]])[7],"_",(set_name(combo_matrix)["1"==strsplit(comb_name(combo_matrix)[i],"")[[1]]])[8],"_",(set_name(combo_matrix)["1"==strsplit(comb_name(combo_matrix)[i],"")[[1]]])[9],"_",(set_name(combo_matrix)["1"==strsplit(comb_name(combo_matrix)[i],"")[[1]]])[10],"_",(set_name(combo_matrix)["1"==strsplit(comb_name(combo_matrix)[i],"")[[1]]])[11])]] <-
+    extract_comb(combo_matrix,comb_name(combo_matrix)[i])
+}
+
+# Convert to DF
+upset_genes_df <- do.call(cbind, lapply(upset_genes_ls, function(x) c(x, rep(NA, max(sapply(upset_genes_ls, length)) - length(x)))))
+
+
+# Save genes
+write.csv(upset_genes_df, file = paste0(output_dir_upset,"upset_genes_df",".csv"))
+
+# Extract unique genes
+grep("_NA_NA_NA_NA_NA_NA_NA_NA_NA_NA",colnames(upset_genes_df))
+DEP_Bl_Res_unique_genes_ol <- c()
+for(i in (grep("_NA_NA_NA_NA_NA_NA_NA_NA_NA_NA",colnames(upset_genes_df)))){
+  DEP_Bl_Res_unique_genes_ol<- c(DEP_Bl_Res_unique_genes_ol,upset_genes_df[,i][!is.na( upset_genes_df[,i])])
+}
+
+# Subset unique genes DF
+DEP_Bl_Res_unique_genes_ol_df <- upset_genes_df[,colnames(upset_genes_df)[grep("_NA_NA_NA_NA_NA_NA_NA_NA_NA_NA",colnames(upset_genes_df))]]
+colnames(DEP_Bl_Res_unique_genes_ol_df) <- gsub("_NA_NA_NA_NA_NA_NA_NA_NA_NA_NA","",colnames(DEP_Bl_Res_unique_genes_ol_df))
+
+# Convert to list
+DEP_Bl_Res_unique_genes_ol_ls <- list()
+for (i in seq_along(colnames(DEP_Bl_Res_unique_genes_ol_df))){
+  DEP_Bl_Res_unique_genes_ol_ls[[colnames(DEP_Bl_Res_unique_genes_ol_df)[i]]] <-
+    c(DEP_Bl_Res_unique_genes_ol_df[,i][!is.na(DEP_Bl_Res_unique_genes_ol_df[,i])])
+}
+
+# Extract overlapping genes column names
+colnames(upset_genes_df)[(grep("_NA_NA_NA_NA_NA_NA_NA_NA_NA_NA",colnames(upset_genes_df), invert = T))]
+
+# Extract overlapping genes
+DEP_Bl_Res_unique_genes_ol_ol_genes <- c()
+for (i in (colnames(upset_genes_df)[(grep("_NA_NA_NA_NA_NA_NA_NA_NA_NA_NA",colnames(upset_genes_df), invert = T))])){
+  DEP_Bl_Res_unique_genes_ol_ol_genes <-
+    c(DEP_Bl_Res_unique_genes_ol_ol_genes,upset_genes_df[,i][!is.na( upset_genes_df[,i] )])
+
+}
+
+```
+
+# serum_unique_genes_ls sig
+
+```{r}
+# Genes that only belong to one cell line and serum condition
+DEP_Bl_Res_unique_genes_ol_ls
+
+names(DEP_Bl_Res_unique_genes_ol_ls)
+
+E5_BL_sig <- c(DEP_Bl_Res_unique_genes_ol_ls[["E5_fs"]],DEP_Bl_Res_unique_genes_ol_ls[["E5_ss"]])
+G1_BL_sig <- c(DEP_Bl_Res_unique_genes_ol_ls[["G1_fs"]],DEP_Bl_Res_unique_genes_ol_ls[["G1_ss"]])
+G5_BL_sig <- c(DEP_Bl_Res_unique_genes_ol_ls[["G5_fs"]],DEP_Bl_Res_unique_genes_ol_ls[["G5_ss"]])
+G8_BL_sig <- c(DEP_Bl_Res_unique_genes_ol_ls[["G8_fs"]],DEP_Bl_Res_unique_genes_ol_ls[["G8_ss"]])
+G12_BL_sig <- c(DEP_Bl_Res_unique_genes_ol_ls[["G12_fs"]],DEP_Bl_Res_unique_genes_ol_ls[["G12_ss"]])
+
+BL_sig_ls <- list(E5_BL_sig=E5_BL_sig,
+                  G1_BL_sig=G1_BL_sig,
+                  G5_BL_sig=G5_BL_sig,
+                  G8_BL_sig=G8_BL_sig,
+                  G12_BL_sig=G12_BL_sig)
+
+BL_sig_df <- do.call(cbind, lapply(BL_sig_ls, function(x) c(x, rep(NA, max(sapply(BL_sig_ls, length)) - length(x)))))
+BL_sig_df
+write.csv(BL_sig_df, file = paste0(output_dir_upset,"BL_sig",".csv"), na="")
+
+```
+
+<!-- ## PCA -->
+<!-- ```{r} -->
+<!-- # Directories  -->
+<!-- output_dir_pca <- paste0(output_dir,"ss_fs_unique/") -->
+<!-- graph_dir_pca <- paste0(graph_dir,"ss_fs_unique/") -->
+
+<!-- DEP_Bl_Res_cb_unique_genes <- DEP_Bl_Res_unique_genes_ol -->
+
+<!-- DEP_Bl_Res_fs <- readRDS(tail(grep("DEP_Bl_Res_fs.rds",list.files(paste0(Data,"Output/MIB-BL/DEP_Bl_Res_fs"), recursive = T, full.names = T), value = T),1)) -->
+
+<!-- sig_DEP_Bl_Res_fs <- DEP_Bl_Res_fs[DEP_Bl_Res_cb_unique_genes,] -->
+
+<!-- pcaData <- PCAtools::pca(assay(sig_DEP_Bl_Res_fs), metadata = colData(sig_DEP_Bl_Res_fs)) -->
+
+<!-- # Set colors -->
+<!-- color_vector <- -->
+<!--   c( -->
+<!--     'C' = 'black', -->
+<!--     'CEv3' = 'red', -->
+<!--     'E4' = 'deepskyblue4', -->
+<!--     'E5' = 'turquoise3', -->
+<!--     'G1' = 'purple4', -->
+<!--     'G5' = 'mediumorchid', -->
+<!--     'G8' = 'deeppink', -->
+<!--     'G12' = 'pink2' -->
+<!--   ) -->
+
+<!-- # PCA 1 -->
+<!-- p1 <- biplot(pcaData, x = "PC1", y = "PC2", -->
+<!--        lab = NULL , -->
+<!--        colby = "cell_line_abbr", -->
+<!--        colkey= color_vector, -->
+<!--        legendPosition = 'right' ) -->
+<!-- p1             -->
+<!-- # save graph as PDF -->
+<!-- ggsave( -->
+<!--   filename = paste0(graph_dir_pca,"pca_","DEP_Bl_Res_fs","cell_line",".pdf"), -->
+<!--   plot = p1 -->
+<!--   ) -->
+
+
+<!-- # DEP_Bl_Res_ss -->
+<!-- DEP_Bl_Res_ss <- readRDS(tail(grep("DEP_Bl_Res_ss.rds",list.files(paste0(Data,"Output/MIB-BL/DEP_Bl_Res_ss"), recursive = T, full.names = T), value = T),1)) -->
+<!-- sig_DEP_Bl_Res_ss <- DEP_Bl_Res_ss[DEP_Bl_Res_cb_unique_genes,] -->
+<!-- pcaData <- PCAtools::pca(assay(sig_DEP_Bl_Res_ss), metadata = colData(sig_DEP_Bl_Res_ss)) -->
+
+<!-- # PCA 1 -->
+<!-- p1 <- biplot(pcaData, x = "PC1", y = "PC2", -->
+<!--        lab = NULL , -->
+<!--        colby = "cell_line_abbr", -->
+<!--        colkey= color_vector, -->
+<!--        legendPosition = 'right' ) -->
+<!-- p1             -->
+<!-- # save graph as PDF -->
+<!-- ggsave( -->
+<!--   filename = paste0(graph_dir_pca,"pca_","DEP_Bl_Res_ss","cell_line",".pdf"), -->
+<!--   plot = p1 -->
+<!--   ) -->
+
+<!-- # bl_Res_fs -->
+<!-- bl_Res_fs <- readRDS(tail(grep("bl_Res_fs.rds",list.files(paste0(Data,"Output/RNA/dds_EDA_subset/bl_Res_fs"), recursive = T, full.names = T), value = T),1)) -->
+<!-- vsd <- vst(bl_Res_fs, blind = T) -->
+<!-- sig_dds_Res_fs <- vsd[DEP_Bl_Res_cb_unique_genes,] -->
+<!-- pcaData <- PCAtools::pca(assay(sig_dds_Res_fs), metadata = colData(sig_dds_Res_fs)) -->
+
+<!-- # PCA 1 -->
+<!-- p1 <- biplot(pcaData, x = "PC1", y = "PC2", -->
+<!--        lab = NULL , -->
+<!--        colby = "cell_line_abbr", -->
+<!--        colkey= color_vector, -->
+<!--        shape = "time_h", -->
+<!--        legendPosition = 'right' ) -->
+<!-- p1 -->
+<!-- # save graph as PDF -->
+<!-- ggsave( -->
+<!--   filename = paste0(graph_dir_pca,"pca_","bl_Res_fs","cell_line",".pdf"), -->
+<!--   plot = p1 -->
+<!--   ) -->
+
+
+<!-- # bl_Res_ss -->
+<!-- bl_Res_ss <- readRDS(tail(grep("bl_Res_ss.rds",list.files(paste0(Data,"Output/RNA/dds_EDA_subset/bl_Res_ss"), recursive = T, full.names = T), value = T),1)) -->
+<!-- vsd <- vst(bl_Res_ss, blind = T) -->
+<!-- sig_dds_Res_ss <- vsd[DEP_Bl_Res_cb_unique_genes,] -->
+<!-- pcaData <- PCAtools::pca(assay(sig_dds_Res_ss), metadata = colData(sig_dds_Res_ss)) -->
+
+<!-- # PCA 1 -->
+<!-- p1 <- biplot(pcaData, x = "PC1", y = "PC2", -->
+<!--        lab = NULL , -->
+<!--        colby = "cell_line_abbr", -->
+<!--        colkey= color_vector, -->
+<!--        shape = "time_h", -->
+<!--        legendPosition = 'right' ) -->
+<!-- p1         -->
+<!-- # save graph as PDF -->
+<!-- ggsave( -->
+<!--   filename = paste0(graph_dir_pca,"pca_","bl_Res_ss","cell_line",".pdf"), -->
+<!--   plot = p1 -->
+<!--   ) -->
+
+
+<!-- # bl_Res_all -->
+<!-- # Combined full and starved RNA -->
+<!-- bl_Res_all <- cbind(bl_Res_ss,bl_Res_fs) -->
+
+<!-- vsd <- vst(bl_Res_all, blind = T) -->
+<!-- sig_dds_Res_ss <- vsd[DEP_Bl_Res_cb_unique_genes,] -->
+<!-- pcaData <- PCAtools::pca(assay(sig_dds_Res_ss), metadata = colData(sig_dds_Res_ss)) -->
+
+<!-- # PCA 1 -->
+<!-- p1 <- biplot(pcaData, x = "PC1", y = "PC2", -->
+<!--        lab = NULL , -->
+<!--        colby = "cell_line_abbr", -->
+<!--        colkey= color_vector, -->
+<!--        shape = "serum", -->
+<!--        legendPosition = 'right' ) -->
+<!-- p1   -->
+<!-- # save graph as PDF -->
+<!-- ggsave( -->
+<!--   filename = paste0(graph_dir_pca,"pca_","bl_Res_all","cell_line",".pdf"), -->
+<!--   plot = p1 -->
+<!--   ) -->
+
+
+<!-- ``` -->
+
+<!-- ## Heatmaps -->
+
+<!-- ### mRNA Heatmap of OL genes -->
+<!-- ```{r} -->
+
+<!-- # Directories  -->
+<!-- dir.create(paste0(output_dir,"ss_fs_unique")) -->
+<!-- output_dir_hm <- paste0(output_dir,"ss_fs_unique/") -->
+<!-- dir.create(paste0(graph_dir,"ss_fs_unique")) -->
+<!-- graph_dir_hm <- paste0(graph_dir,"ss_fs_unique/") -->
+
+<!-- # Genes list -->
+<!-- DEP_Bl_Res_cb_unique_genes -->
+
+<!-- # Combined full and starved RNA -->
+<!-- bl_Res_all <- cbind(bl_Res_ss,bl_Res_fs) -->
+
+<!-- vsd <- vst(bl_Res_all, blind = T) -->
+<!-- vsd_Heatmap_GOI <- vsd[DEP_Bl_Res_cb_unique_genes,] -->
+
+
+
+<!-- # Extract matrix values from vsd_Heatmap_GOI -->
+<!-- mat <- as.matrix(assay(vsd_Heatmap_GOI)) -->
+
+<!-- # Heatmap annotations  -->
+<!-- annotation_col <- HeatmapAnnotation(df = data.frame("Model" = factor(vsd_Heatmap_GOI@colData$cell_line_abbr, -->
+<!--                                                     # Set legend order -->
+<!--                                                     levels= c("CEv3","E4","E5","G1","G5","G8","G12")), -->
+<!--                                                     "Serum"=vsd_Heatmap_GOI@colData$serum, -->
+<!--                                                     "Sen" = vsd_Heatmap_GOI@colData$EGFR_TKI_sen), -->
+<!--     which="column", -->
+<!--     col = list("Model" =   -->
+<!--   c( -->
+<!--     'CEv3' = 'red', -->
+<!--     'E4' = 'deepskyblue4', -->
+<!--     'E5' = 'turquoise3', -->
+<!--     'G1' = 'purple4', -->
+<!--     'G5' = 'mediumorchid', -->
+<!--     'G8' = 'deeppink', -->
+<!--     'G12' = 'pink2' -->
+<!--   ), -->
+<!--   Serum = -->
+<!--     c("full"='firebrick', -->
+<!--       "starve"='royalblue' -->
+<!--       ), -->
+<!--   Sen = -->
+<!--     c('Resistant'='brown', -->
+<!--       'Sensitive'='blue') -->
+<!--   )) -->
+
+<!-- # Generate Heatmap -->
+<!-- heatmap <- ComplexHeatmap::Heatmap( -->
+<!--   t(scale(t(mat))), -->
+<!--   top_annotation = annotation_col, -->
+<!--   name = " ", -->
+<!--   column_title = "mRNA_ol_kinase", -->
+<!--   show_column_names = F, -->
+<!--   show_row_names = T -->
+<!--   ) -->
+
+<!-- # Save Heatmap -->
+<!-- pdf(file=paste0(graph_dir_hm,"mRNA_ol_kinase.pdf")) -->
+<!-- draw(heatmap) -->
+<!-- dev.off() -->
+
+<!-- # Draw Heatmap -->
+<!-- draw(heatmap) -->
+
+<!-- # Graphics termination -->
+<!-- if(!is.null(dev.list())) dev.off() -->
+<!-- if(!is.null(dev.list())) graphics.off() -->
+
+<!-- ``` -->
+
+<!-- ### Protein Heatmap of OL genes -->
+<!-- ```{r} -->
+
+<!-- # Directories  -->
+<!-- dir.create(paste0(output_dir,"ss_fs_ol")) -->
+<!-- output_dir_hm <- paste0(output_dir,"ss_fs_ol/") -->
+<!-- dir.create(paste0(graph_dir,"ss_fs_ol")) -->
+<!-- graph_dir_hm <- paste0(graph_dir,"ss_fs_ol/") -->
+
+<!-- # Genes list -->
+<!-- DEP_Bl_Res_cb_unique_genes -->
+
+<!-- # Combined full and starved Protein -->
+<!-- DEP_Bl_Res_all <- cbind(DEP_Bl_Res_fs,DEP_Bl_Res_ss) -->
+
+<!-- vsd <- DEP_Bl_Res_all -->
+<!-- vsd_Heatmap_GOI <- vsd[DEP_Bl_Res_cb_unique_genes,] -->
+
+<!-- # Extract matrix values from vsd_Heatmap_GOI -->
+<!-- mat <- as.matrix(assay(vsd_Heatmap_GOI)) -->
+
+<!-- # Heatmap annotations  -->
+<!-- annotation_col <- HeatmapAnnotation(df = data.frame("Model" = factor(vsd_Heatmap_GOI@colData$cell_line_abbr, -->
+<!--                                                     # Set legend order -->
+<!--                                                     levels= c("CEv3","E4","E5","G1","G5","G8","G12")), -->
+<!--                                                     "Serum"=vsd_Heatmap_GOI@colData$serum, -->
+<!--                                                     "Sen" = vsd_Heatmap_GOI@colData$EGFR_TKI_sen), -->
+<!--     which="column", -->
+<!--     col = list("Model" =   -->
+<!--   c( -->
+<!--     'CEv3' = 'red', -->
+<!--     'E4' = 'deepskyblue4', -->
+<!--     'E5' = 'turquoise3', -->
+<!--     'G1' = 'purple4', -->
+<!--     'G5' = 'mediumorchid', -->
+<!--     'G8' = 'deeppink', -->
+<!--     'G12' = 'pink2' -->
+<!--   ), -->
+<!--   Serum = -->
+<!--     c("full"='firebrick', -->
+<!--       "starve"='royalblue' -->
+<!--       ), -->
+<!--   Sen = -->
+<!--     c('Resistant'='brown', -->
+<!--       'Sensitive'='blue') -->
+<!--   )) -->
+
+<!-- # Generate Heatmap -->
+<!-- heatmap <- ComplexHeatmap::Heatmap( -->
+<!--   t(scale(t(mat))), -->
+<!--   top_annotation = annotation_col, -->
+<!--   name = " ", -->
+<!--   column_title = "protein_5_ol_kinase", -->
+<!--   show_column_names = F, -->
+<!--   show_row_names = T -->
+<!--   ) -->
+
+<!-- # Save Heatmap -->
+<!-- pdf(file=paste0(graph_dir_hm,"protein_5_ol_kinase.pdf")) -->
+<!-- draw(heatmap) -->
+<!-- dev.off() -->
+
+<!-- # Draw Heatmap -->
+<!-- draw(heatmap) -->
+
+<!-- # Graphics termination -->
+<!-- if(!is.null(dev.list())) dev.off() -->
+<!-- if(!is.null(dev.list())) graphics.off() -->
+
+<!-- ``` -->
+
+
+
+# Overlap of OL
+```{r}
+
+# These are genes that change in more than one resistant line. 
+DEP_Bl_Res_fs_ol_genes
+DEP_Bl_Res_ss_ol_genes
+
+# Filter out intersecting genes
+filt_DEP_Bl_Res_fs_ol_genes <- DEP_Bl_Res_fs_ol_genes[!(DEP_Bl_Res_fs_ol_genes %in% intersect_genes)]
+filt_DEP_Bl_Res_ss_ol_genes <- DEP_Bl_Res_ss_ol_genes[!(DEP_Bl_Res_ss_ol_genes %in% intersect_genes)]
+
+# Combine fs and ss genes
+serum_unique_genes_ls <- list(fs = filt_DEP_Bl_Res_fs_ol_genes,
+                              ss = filt_DEP_Bl_Res_ss_ol_genes)
+
+# Directories 
+dir.create(paste0(output_dir,"ss_fs_ol"))
+output_dir_upset <- paste0(output_dir,"ss_fs_ol/")
+dir.create(paste0(graph_dir,"ss_fs_ol"))
+graph_dir_upset <- paste0(graph_dir,"ss_fs_ol/")
+
+
+# Convert list to binary matrix
+Upset_matrix <- ComplexHeatmap::list_to_matrix(serum_unique_genes_ls)
+
+# Save Upset_matrix
+write.csv(Upset_matrix, file = paste0(output_dir_upset, "FullUpset_matrix",".csv"))
+
+# convert list to combination matrix
+combo_matrix <- ComplexHeatmap::make_comb_mat(Upset_matrix)
+
+# Generate upset plot
+upset_plot <- ComplexHeatmap::UpSet(combo_matrix, comb_col = "blue" ,
+                        row_names_gp =gpar(fontsize = 12) ,
+                        top_annotation = upset_top_annotation(
+                          combo_matrix, 
+                          add_numbers = TRUE, 
+                          numbers_gp = gpar(fontsize = 11),
+                          numbers_rot=0,  
+                          annotation_name_rot = 90, 
+                          axis_param=list (gp = gpar(fontsize = 11)),
+                          annotation_name_gp= gpar(fontsize = 14)),
+                        right_annotation = upset_right_annotation(
+                          combo_matrix, 
+                          add_numbers = TRUE, 
+                          numbers_gp = gpar(fontsize = 11),
+                          numbers_rot=0,
+                          axis_param=list (gp = gpar(fontsize = 11)),
+                          annotation_name_gp= gpar(fontsize = 14)),
+                        pt_size = unit(5, "pt"))
+
+upset_plot
+
+# Save upset_plot
+pdf(file=paste0(graph_dir_upset, "UpsetFull" , ".pdf"))
+draw(upset_plot)
+dev.off()
+
+# Combination matrix
+combo_matrix
+comb_name(combo_matrix)
+
+# Extract all from upset plot
+upset_genes_ls <- list()
+for(i in seq_along(comb_name(combo_matrix))){
+  upset_genes_ls[[paste0((set_name(combo_matrix)["1"==strsplit(comb_name(combo_matrix)[i],"")[[1]]])[1],"_",(set_name(combo_matrix)["1"==strsplit(comb_name(combo_matrix)[i],"")[[1]]])[2])]] <-
+    extract_comb(combo_matrix,comb_name(combo_matrix)[i])
+}
+
+# Convert to DF
+upset_genes_df <- do.call(cbind, lapply(upset_genes_ls, function(x) c(x, rep(NA, max(sapply(upset_genes_ls, length)) - length(x)))))
+
+
+# Save genes
+write.csv(upset_genes_df, file = paste0(output_dir_upset,"upset_genes_df",".csv"))
+
+# Extract fs_ss Ol
+fs_ss_ol_kinases <- data.frame(upset_genes_df)["fs_ss"][!is.na(data.frame(upset_genes_df)["fs_ss"])]
+
+```
+
+## sig
+
+```{r}
+DEP_Bl_Res_unique_genes_ol_ls
+
+names(DEP_Bl_Res_unique_genes_ol_ls)
+
+E5_BL_sig <- c(DEP_Bl_Res_unique_genes_ol_ls[["E5_fs"]],DEP_Bl_Res_unique_genes_ol_ls[["E5_ss"]])
+G1_BL_sig <- c(DEP_Bl_Res_unique_genes_ol_ls[["G1_fs"]],DEP_Bl_Res_unique_genes_ol_ls[["G1_ss"]])
+G5_BL_sig <- c(DEP_Bl_Res_unique_genes_ol_ls[["G5_fs"]],DEP_Bl_Res_unique_genes_ol_ls[["G5_ss"]])
+G8_BL_sig <- c(DEP_Bl_Res_unique_genes_ol_ls[["G8_fs"]],DEP_Bl_Res_unique_genes_ol_ls[["G8_ss"]])
+G12_BL_sig <- c(DEP_Bl_Res_unique_genes_ol_ls[["G12_fs"]],DEP_Bl_Res_unique_genes_ol_ls[["G12_ss"]])
+
+# Genes that overlap and are not influenced by serum
+OL_BL_sig <- intersect(serum_unique_genes_ls[["fs"]],serum_unique_genes_ls[["ss"]])
+
+
+BL_sig_ls <- list(E5_BL_sig=E5_BL_sig,
+                  G1_BL_sig=G1_BL_sig,
+                  G5_BL_sig=G5_BL_sig,
+                  G8_BL_sig=G8_BL_sig,
+                  G12_BL_sig=G12_BL_sig,
+                  OL_BL_sig=OL_BL_sig)
+
+BL_sig_df <- do.call(cbind, lapply(BL_sig_ls, function(x) c(x, rep(NA, max(sapply(BL_sig_ls, length)) - length(x)))))
+
+BL_sig_df
+write.csv(BL_sig_df, file = paste0(output_dir_upset,"BL_sig",".csv"), na="")
+
+```
+
+# Session Info
+```{r}
+sessionInfo()
+```
+
+# Timing End
+```{r}
+proc.time() - ptm
+```

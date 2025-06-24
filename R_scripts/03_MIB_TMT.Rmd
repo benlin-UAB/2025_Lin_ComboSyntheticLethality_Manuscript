@@ -1,0 +1,2546 @@
+---
+title: "03_MIB_TMT"
+author: "Benjamin Lin"
+editor: "C Ryan Miller"
+date: '`r format(Sys.time(), "Last modified: %d %b %Y")`'
+output:
+  html_document:
+    toc: yes
+    toc_float: yes
+    toc_depth: 6 
+    code_folding: hide
+layout: page
+subtitle: "C Ryan Miller Lab @ UAB"
+affiliation: UAB
+editor_options: 
+  chunk_output_type: inline
+  markdown: 
+    wrap: sentence
+---
+
+This R Markdown (RMD) file performs exploratory data analysis (EDA) and differential expression (DE) analysis for the 2025 Lin manuscript.
+
+Script Timing Start
+```{r}
+ptm <- proc.time()
+```
+
+## Variables
+```{r}
+# adjusted pvalue
+qval <- 0.05
+pval <- 0.05
+lfc <- .5
+
+# Use max of 4 cores if available.
+ncore <- ifelse((detectCores()-2)>=4,4,detectCores()-2)
+```
+
+Set.Seed
+```{r}
+# This will set the random number generator
+set.seed(888)
+```
+
+# MIB-MS dynamic data
+## Directories
+```{r}
+# output directory
+MIB_output <- paste0(Data, "Output/MIB-DYN/")
+dir.create(paste0(MIB_output))
+
+# Graphs
+MIB_graphs <- paste0(Data, "Graphs/MIB-DYN/")
+dir.create(paste0(MIB_graphs))
+```
+
+## TMT protein groups Import
+Import protein groups data
+```{r}
+# TMT1 txt file was regenerated from the excel. Saved as a tab delimited text file
+
+path <- "/Data/Input/MIB-MS/Dynamic/TMT_proteinGroups"
+
+filelist <- list.files(path=path, full.names = TRUE)
+
+# Import protein groups. Renames by base filename using string extraction
+proteinGroups_ls <- list()
+for (i in seq_along(filelist)){
+  proteinGroups_ls[[sapply(strsplit(paste0(basename(filelist[i])), "_"), '[',1)]] <-
+    read.table(filelist[i], sep="\t", header = TRUE )
+}
+
+# Sort alpha numeric
+mixedsort(names(proteinGroups_ls), decreasing = F)
+
+# Order the list of dataframe
+proteinGroups_ls_ordered <- list()
+for (i in seq_along(filelist)){
+  proteinGroups_ls_ordered[mixedsort(names(proteinGroups_ls), decreasing = F)[i]] <- 
+    proteinGroups_ls[names(proteinGroups_ls)==mixedsort(names(proteinGroups_ls), decreasing = F)[i]]
+}
+
+
+# Subset to kinases only
+proteinGroups_kinases_ls <- list()
+for (i in seq_along(proteinGroups_ls_ordered)){
+ proteinGroups_kinases_ls[[names(proteinGroups_ls_ordered)[i]]] <-
+   subset(proteinGroups_ls_ordered[[i]], proteinGroups_ls_ordered[[i]]$Gene.names %in% c(kinases.anno$Mouse_symbol,"EGFR"))
+}
+
+# Change EGFR to hEGFR
+for (i in seq_along(proteinGroups_kinases_ls)){
+  proteinGroups_kinases_ls[[i]]$Gene.names <- 
+    replace(proteinGroups_kinases_ls[[i]]$Gene.name,proteinGroups_kinases_ls[[i]]$Gene.name %in% c("EGFR"),"hEGFR")
+}
+
+# Assign genes as rownames
+for ( i in seq_along(proteinGroups_kinases_ls)){
+  rownames(proteinGroups_kinases_ls[[i]])<- proteinGroups_kinases_ls[[i]]$Gene.names
+}
+
+# Extract out Reporter intensity
+kinase_raw_counts <- list()
+for ( i in seq_along(proteinGroups_kinases_ls)){
+  kinase_raw_counts[[names(proteinGroups_kinases_ls)[i]]] <-
+    proteinGroups_kinases_ls[[i]][,colnames(proteinGroups_kinases_ls[[i]]) %in% c("Reporter.intensity.1","Reporter.intensity.2","Reporter.intensity.3", "Reporter.intensity.4","Reporter.intensity.5","Reporter.intensity.6")]
+}
+
+# Normalization
+kinase_norm <- list()
+for ( i in seq_along(kinase_raw_counts)){
+  kinase_norm[[names(kinase_raw_counts)[i]]]<-
+    data.frame(colSums(kinase_raw_counts[[i]]))
+  colnames(kinase_norm[[names(kinase_raw_counts)[i]]])<- "sums"
+}
+
+# Extract reporter 6 %. Reporter 6 is the pooled control. 
+kinase_norm_per <- list()
+for (i in seq_along(kinase_raw_counts)){
+  kinase_norm_per[[names(kinase_raw_counts)[i]]] <-
+  as.data.frame(colSums(kinase_raw_counts[[i]])[6]/sum(colSums(kinase_raw_counts[[i]]))*100)
+  colnames(kinase_norm_per[[names(kinase_raw_counts)[i]]]) <- names(kinase_raw_counts)[[i]]
+}
+
+# Convert to matrix
+kinase_norm_per_matrix <- kinase_norm_per %>% map( ~ .x %>%
+             rownames_to_column('Reporter.intensity.6'))  %>% 
+   reduce(full_join, by = 'Reporter.intensity.6') 
+
+# Remove column label
+kinase_norm_per_matrix <- kinase_norm_per_matrix[,-which(names(kinase_norm_per_matrix) %in% c("Reporter.intensity.6"))]
+
+# Total sum of Reporter.intensity.6 %
+sum(kinase_norm_per_matrix[1,])/(length(kinase_norm_per_matrix[1,]))
+
+# Get a normalization factor for each TMT experiment
+kinase_norm_per_matrix["norm_factor",] <- (sum(kinase_norm_per_matrix[1,])/(length(kinase_norm_per_matrix[1,])))/kinase_norm_per_matrix[1,]
+
+
+
+colSums(kinase_raw_counts[[1]])
+sum(colSums(kinase_raw_counts[[1]]))
+colSums(kinase_raw_counts[[1]])[6]/sum(colSums(kinase_raw_counts[[1]]))
+colSums(kinase_raw_counts[[1]])[1]/sum(colSums(kinase_raw_counts[[1]]))
+colSums(kinase_raw_counts[[1]])[2]/sum(colSums(kinase_raw_counts[[1]]))
+
+# Rename the columns
+kinase_raw_counts_rn <- list()
+for ( i in seq_along(kinase_raw_counts)){
+  kinase_raw_counts_rn[[names(kinase_raw_counts)[i]]] <- kinase_raw_counts[[i]]
+    colnames(kinase_raw_counts_rn[[names(kinase_raw_counts)[i]]]) <- c(paste0(names(kinase_raw_counts)[i],"_","R1"),
+                                                                       paste0(names(kinase_raw_counts)[i],"_","R2"),
+                                                                       paste0(names(kinase_raw_counts)[i],"_","R3"),
+                                                                       paste0(names(kinase_raw_counts)[i],"_","R4"),
+                                                                       paste0(names(kinase_raw_counts)[i],"_","R5"),
+                                                                       paste0(names(kinase_raw_counts)[i],"_","R6"))
+    }
+
+
+# Extract out subset of Reporter intensity
+kinase_raw_counts_subset <- list()
+for ( i in seq_along(proteinGroups_kinases_ls)){
+  kinase_raw_counts_subset[[names(proteinGroups_kinases_ls)[i]]] <-
+    proteinGroups_kinases_ls[[i]][,colnames(proteinGroups_kinases_ls[[i]]) %in% c("Reporter.intensity.1","Reporter.intensity.2","Reporter.intensity.3", "Reporter.intensity.4")]
+}
+
+# Multiply all values by norm factor and round to the nearest integer
+kinase_norm_intensity <- list()
+for ( i in seq_along(kinase_raw_counts_subset)){
+  kinase_norm_intensity[[names(kinase_raw_counts_subset)[i]]] <-
+    round(kinase_raw_counts_subset[[i]]*kinase_norm_per_matrix["norm_factor",i])
+}
+
+
+# Rename the columns
+kinase_norm_intensity_rn <- list()
+for ( i in seq_along(kinase_norm_intensity)){
+  kinase_norm_intensity_rn[[names(kinase_norm_intensity)[i]]] <- kinase_norm_intensity[[i]]
+    colnames(kinase_norm_intensity_rn[[names(kinase_norm_intensity)[i]]]) <- c(paste0(names(kinase_norm_intensity)[i],"_","R1"),
+                                                                       paste0(names(kinase_norm_intensity)[i],"_","R2"),
+                                                                       paste0(names(kinase_norm_intensity)[i],"_","R3"),
+                                                                       paste0(names(kinase_norm_intensity)[i],"_","R4"))
+    }
+
+
+# Merge list of dataframe to one big dataframe. We loop through the list with map, create a row names column with rownames_to_column and reduce to a single dataset by doing a full_join by the row names.
+
+kinase_norm_intensity_matrix <- kinase_norm_intensity_rn %>% map( ~ .x %>%
+             rownames_to_column('Gene.names'))  %>% 
+   reduce(full_join, by = 'Gene.names') 
+
+# Replace all na with 0 value
+kinase_norm_intensity_matrix[is.na(kinase_norm_intensity_matrix)] <- "0"
+
+
+
+```
+
+## Sample metadata
+```{r}
+# Import master sequencing datasheet
+TMT_samples_all <-
+read.csv(
+    "/Data/Input/MIB-MS/Dynamic/240530_MIB_TMT_SampleSheet.csv",
+    header = TRUE,
+    sep = ",",
+    stringsAsFactors = FALSE
+  )
+
+# Edit cell line name
+TMT_samples_all$Cell.Line <- ifelse(TMT_samples_all$Cell.Line=="PC","CEv3",TMT_samples_all$Cell.Line)
+
+# Convert to factors
+TMT_samples_all$replicate <- as.factor(TMT_samples_all$replicate )
+TMT_samples_all$Cell.Line <- as.factor(TMT_samples_all$Cell.Line )
+TMT_samples_all$Timepoint <- as.factor(TMT_samples_all$Timepoint )
+TMT_samples_all$clid <- as.factor(TMT_samples_all$clid)
+TMT_samples_all$serum <- as.factor(TMT_samples_all$serum)
+TMT_samples_all$condition <- paste0(TMT_samples_all$Cell.Line, "_" ,TMT_samples_all$Timepoint)
+TMT_samples_all$condition <- as.factor(TMT_samples_all$condition)
+TMT_samples_all$Prep <- as.factor(TMT_samples_all$Prep)
+TMT_samples_all$replicate <- as.factor(TMT_samples_all$replicate)
+TMT_samples_all$Timepoint <- as.factor(TMT_samples_all$Timepoint)
+TMT_samples_all$name <- paste0(TMT_samples_all$condition, "_" ,TMT_samples_all$replicate)
+TMT_samples_all$name <- as.factor(TMT_samples_all$name)
+TMT_samples_all$Run <- as.factor(TMT_samples_all$Run)
+TMT_samples_all$EGFR_TKI_sen <- as.factor(ifelse(TMT_samples_all$Cell.Line %in% c("E4","E5","G1","G5","G8","G12","GR1","GR7"),"Resistant","Sensitive"))
+
+
+# Check the samplesheet
+str(TMT_samples_all)
+
+# Make measure column for DEP
+TMT_samples_all$measure <- "Intensity"
+
+
+# Remove cell lines not part of this experiment
+TMT_samples_all <- TMT_samples_all[!TMT_samples_all$Cell.Line %in% c("CEv3P", "CP", "CE", "CEv3_MA", "S1","GR1","GR7" ), ]
+```
+
+
+```{r}
+# Copy over adjusted intensity matrix
+se_TMT_all <- kinase_norm_intensity_matrix
+
+se_TMT_all[,2:169]<- as.numeric(unlist(se_TMT_all[,2:169]))
+
+# Remove gene.name
+row.names(se_TMT_all) <- se_TMT_all$Gene.names
+se_TMT_all <- se_TMT_all[,-which(names(se_TMT_all) %in% c("Gene.names"))]
+
+# Organize for DEP
+se_TMT_all$ID <- row.names(se_TMT_all)
+se_TMT_all$name <- row.names(se_TMT_all)
+
+# Extract sample names from data matrix
+cols <- grep("TMT", colnames(se_TMT_all))
+
+# Check samples match between data matrix and sample sheet
+TMT_samples_all$label %in% colnames(se_TMT_all)
+TMT_samples_all$label[!(TMT_samples_all$label %in% colnames(se_TMT_all))]
+
+# Save sample sheet
+write.csv(TMT_samples_all, file=paste0(MIB_output,"MIB_TMT_SampleSheet.csv"))
+
+# Save Raw counts
+write.csv(se_TMT_all, file=paste0(MIB_output,"MIB_TMT_RawData.csv") )
+
+# Make DEP object
+DEP_TMT <- DEP::make_se(se_TMT_all, cols, TMT_samples_all)
+ 
+```
+
+### DEP_TMT_all
+#### Directories
+```{r}
+# Directories for DEP_Bl_Par
+dir.create(paste0(MIB_graphs,"DEP_TMT_all"))
+dir.create(paste0(MIB_output,"DEP_TMT_all"))
+graph_dir <- paste0(MIB_graphs,"DEP_TMT_all/")
+output_dir <- paste0(MIB_output,"DEP_TMT_all/")
+```
+
+
+### VST
+```{r}
+# Copy over
+se_mibs_TMT_raw <- DEP_TMT
+
+# Build summarized experiment object
+se_mibs_TMT_vsn <- DEP::normalize_vsn(se_mibs_TMT_raw)
+
+# Pre and post normalization comparison
+DEP::plot_normalization(se_mibs_TMT_raw,se_mibs_TMT_vsn)
+```
+
+### Identify missing values
+```{r}
+# Plot a heatmap of proteins with missing values
+missval_plot <- DEP::plot_missval(se_mibs_TMT_vsn)
+missval_plot
+
+# Frequency plot of missing values
+freq_plot <- DEP::plot_frequency(se_mibs_TMT_vsn)
+freq_plot
+
+# Plot intensity distributions and cumulative fraction of proteins with and without missing values
+detect_plot <- DEP::plot_detect(se_mibs_TMT_vsn)
+detect_plot
+```
+### Impute missing values
+```{r}
+# Impute missing data using random draws from a manually defined left-shifted Gaussian distribution (for MNAR)
+# scale Numeric(1), Sets the width of the distribution relative to the standard deviation of the original distribution
+# shift Numeric(1), Sets the left-shift of the distribution (in standard deviations) from the median of the original distribution.
+
+# # Begin comment out
+# 
+# # Comment out after running once to lock in imputed values
+# set.seed(888)
+# se_mibs_TMT_mv <- DEP::impute(se_mibs_TMT_vsn, fun = "man", shift = 3, scale = 0.3)
+# 
+# # write imputation data to RDS and csv to 'lock in' that specific imputation. Writing to both the impute folder and the output folder simultaneously.
+# 
+# saveRDS(se_mibs_TMT_mv,file = paste0("/Data/Input/MIB-MS/Dynamic/","se_mibs_TMT_mv",".rds"))
+# saveRDS(se_mibs_TMT_mv,file = paste0(MIB_output,"se_mibs_TMT_mv",".rds"))
+# 
+# write.csv(assays(se_mibs_TMT_mv), paste0("/Data/Input/MIB-MS/Dynamic/","se_mibs_TMT_mv",".csv"))
+# write.csv(assays(se_mibs_TMT_mv), paste0(MIB_output,"se_mibs_TMT_mv",".csv"))
+# 
+# # End comment out
+
+# read in imputation RDS to use for rest of code
+se_mibs_TMT_mv <- readRDS(paste0("/Data/Input/MIB-MS/Dynamic/","se_mibs_TMT_mv",".rds"))
+
+# Plot intensity distributions before and after imputation
+impute_plot <- plot_imputation(se_mibs_TMT_vsn, se_mibs_TMT_mv)
+impute_plot
+```
+
+### Batch correction
+```{r}
+# Batch correction using Limma
+se_mibs_TMT_bc <- se_mibs_TMT_mv
+assay(se_mibs_TMT_bc) <- limma::removeBatchEffect(assay(se_mibs_TMT_bc), batch = se_mibs_TMT_bc@colData$Prep , batch2=se_mibs_TMT_bc@colData$Run )
+```
+
+### QC
+#### Box plots
+```{r}
+boxplot(assay(se_mibs_TMT_raw), las=2, ylab="log2 ratio", main="Raw")
+boxplot(assay(se_mibs_TMT_vsn), las=2, ylab="log2 ratio", main=paste0("vsn"))
+boxplot(assay(se_mibs_TMT_mv), las=2, ylab="log2 ratio", main=paste0("impute missing values"))
+boxplot(assay(se_mibs_TMT_bc), las=2, ylab="log2 ratio", main=paste0("batch correction"))
+
+meanSdPlot(se_mibs_TMT_raw)
+meanSdPlot(se_mibs_TMT_vsn)
+meanSdPlot(se_mibs_TMT_mv)
+meanSdPlot(se_mibs_TMT_bc)
+```
+
+#### PCA plots
+PCA cannot be performed with missing values
+
+##### Imputed values
+```{r}
+# PCA with all genes
+
+# Create pca object
+pcaData <- PCAtools::pca(assay(se_mibs_TMT_mv), metadata = colData(se_mibs_TMT_mv))
+
+# Save pca data
+write.csv(pcaData$rotated, file =paste0(output_dir,"pcaData",".csv"))
+
+# Set colors
+color_vector <-
+    c(
+    'C' = 'black',
+    'CEv3' = 'red',
+    'E4' = 'deepskyblue4',
+    'E5' = 'turquoise3',
+    'G1' = 'purple4',
+    'G5' = 'mediumorchid',
+    'G8' = 'deeppink',
+    'G12' = 'pink2'
+    )
+
+
+# plot 5 pricipal components in a pairsplot
+pairsplot <- pairsplot(pcaData,
+    components = getComponents(pcaData, c(1:5)),
+    triangle = TRUE, trianglelabSize = 12,
+    hline = 0, vline = 0,
+    pointSize = 0.4,
+    gridlines.major = FALSE, gridlines.minor = FALSE,
+    colby = 'Cell.Line',
+    colkey= color_vector,
+    title = 'Pairs plot', plotaxes = FALSE,
+    legendPosition = 'none',
+    margingaps = unit(c(-0.01, -0.01, -0.01, -0.01), 'cm'))
+pairsplot
+# save graph as PDF
+ggsave(
+  filename = paste0(graph_dir,"pca_","pairsplot_mv", ".pdf"),
+  plot = pairsplot
+  )
+
+# PCA 1
+p1 <- biplot(pcaData, x = "PC1", y = "PC2",
+       lab = NULL ,
+       colby = "Cell.Line",
+       colkey= color_vector,
+       shape = "Timepoint",
+       legendPosition = 'right' )
+p1
+# save graph as PDF
+ggsave(
+  filename = paste0(graph_dir,"pca_mv_","cell_line",".pdf"),
+  plot = p1
+  )
+```
+
+##### Batch corrected values
+
+```{r}
+# PCA with all genes
+
+# Create pca object
+pcaData <- PCAtools::pca(assay(se_mibs_TMT_bc), metadata = colData(se_mibs_TMT_bc))
+
+# Save pca data
+write.csv(pcaData$rotated, file =paste0(output_dir,"pcaData",".csv"))
+
+# Set colors
+color_vector <-
+    c(
+    'C' = 'black',
+    'CEv3' = 'red',
+    'E4' = 'deepskyblue4',
+    'E5' = 'turquoise3',
+    'G1' = 'purple4',
+    'G5' = 'mediumorchid',
+    'G8' = 'deeppink',
+    'G12' = 'pink2'
+    )
+
+# plot 5 pricipal components in a pairsplot
+pairsplot <- pairsplot(pcaData,
+    components = getComponents(pcaData, c(1:5)),
+    triangle = TRUE, trianglelabSize = 12,
+    hline = 0, vline = 0,
+    pointSize = 0.4,
+    gridlines.major = FALSE, gridlines.minor = FALSE,
+    colby = 'Cell.Line',
+    colkey= color_vector,
+    title = 'Pairs plot', plotaxes = FALSE,
+    legendPosition = 'none',
+    margingaps = unit(c(-0.01, -0.01, -0.01, -0.01), 'cm'))
+pairsplot
+# save graph as PDF
+ggsave(
+  filename = paste0(graph_dir,"pca_","pairsplot_bc", ".pdf"),
+  plot = pairsplot
+  )
+
+# PCA 1
+p1 <- biplot(pcaData, x = "PC1", y = "PC2",
+       lab = NULL ,
+       colby = "Cell.Line",
+       colkey= color_vector,
+       shape = "Timepoint",
+       legendPosition = 'right' )
+p1
+# save graph as PDF
+ggsave(
+  filename = paste0(graph_dir,"pca_bc_","cell_line",".pdf"),
+  plot = p1
+  )
+```
+
+## DE analysis with limma
+### Directories
+```{r}
+# Directories for MIB
+MIB_output
+MIB_graphs
+
+# Directory for full SE obj
+dir.create(paste0(MIB_output,"DEP_TMT_all"))
+dir.create(paste0(MIB_graphs,"DEP_TMT_all"))
+graph_dir <- paste0(MIB_graphs,"DEP_TMT_all/")
+output_dir <- paste0(MIB_output,"DEP_TMT_all/")
+
+# Directory for Full SE obj results
+dir.create(paste0(output_dir,"Limma_res"))
+output_dir_res <- paste0(output_dir,"Limma_res/")
+dir.create(paste0(graph_dir,"Limma_res"))
+graph_dir_res <- paste0(graph_dir,"Limma_res/")
+```
+
+### Comparisons
+```{r}
+
+se_mibs_TMT_mv@colData$condition <- as.factor(se_mibs_TMT_mv@colData$condition)
+
+# comps
+comps_factor <- as.vector(factor(paste0(colData(se_mibs_TMT_mv)$condition)))
+comps_df <- crossing(comp_num=comps_factor, comp_denom=comps_factor)
+comps_df <- subset(comps_df, as.character(comps_df$comp_num) != as.character(comps_df$comp_denom))
+
+# All comps
+comps_df_all <- comps_df
+comps_df_all <- cbind(comp_type="condition",comps_df_all)
+comps_df_all <- cbind(comp_no=1:nrow(comps_df_all),comps_df_all)
+comps_df_all$comp_name <- paste(comps_df_all$comp_num, "vs", comps_df_all$comp_denom, sep = "-")
+comps_df_all$comp <- paste(comps_df_all$comp_num,comps_df_all$comp_denom, sep="-")
+write.csv(comps_df_all, file=paste0(output_dir_res,"comps_all.csv"), col.names = T, row.names = F)
+comps_all_subset <- comps_df_all[,2:4]
+
+# Unique comps only (for only unique combo)
+comps_df_unique <- comps_df[!duplicated(t(apply(comps_df, 1, sort))), ]
+comps_df_unique <- cbind(comp_type="condition",comps_df_unique )
+comps_df_unique <- cbind(comp_no=1:nrow(comps_df_unique),comps_df_unique)
+comps_df_unique$comp_name <- paste(comps_df_unique$comp_num, "vs", comps_df_unique$comp_denom, sep = "-")
+comps_df_unique$comp <- paste(comps_df_unique$comp_num,comps_df_unique$comp_denom, sep="-")
+write.csv(comps_df_unique, file=paste0(output_dir_res,"comps_unique.csv"), col.names = T, row.names = F)
+comps_unique_subset <- comps_df_unique[,2:4]
+
+# Comp list to use (all comps)
+comps <- comps_df_all
+```
+
+### DE Analysis
+```{r}
+# Extract gene matrix
+gene.matrix <- as.matrix(assay(se_mibs_TMT_mv))
+
+# make design table
+cond <- as.vector(se_mibs_TMT_mv@colData$condition)
+prep <- as.vector(se_mibs_TMT_mv@colData$Prep)
+run <- as.vector(se_mibs_TMT_mv@colData$Run)
+
+# Design formula with prep and run as covariates.
+design <- model.matrix(~0 + cond + prep + run)
+
+colnames(design) = gsub("cond","",colnames(design))
+
+head(design)
+
+#limma part analysis
+fit1 <- lmFit(gene.matrix, design)
+
+# Make contrasts
+contrast <- makeContrasts(contrasts=comps$comp,levels=design)
+fit2 <- eBayes(contrasts.fit(fit1,contrasts = contrast))
+
+# Extract results
+mibs_comp_list <- list()
+for (i in seq_along(comps$comp)){
+  mibs_comp_list[[comps$comp[i]]] <-
+    topTreat(fit2, coef=comps$comp[i], number=Inf, adjust.method = "fdr")
+  mibs_comp_list[[comps$comp[i]]]$gene <- row.names(mibs_comp_list[[comps$comp[i]]])
+}
+
+# Estimate true null
+propTrueNull(mibs_comp_list[[1]]$P.Value)
+
+# save results
+for (i in seq_along(mibs_comp_list)) {
+  write.csv(
+  mibs_comp_list[[i]],
+  file = paste0(output_dir_res,"comp_", i, "_", names(mibs_comp_list)[i], ".csv"),
+  row.names = TRUE
+  )
+}
+```
+
+### DE results
+```{r}
+# Results
+# mibs_comp_list
+
+# Extract results
+DEP_TMT_limmaRes <- list()
+for (i in seq_along(comps$comp)){
+  DEP_TMT_limmaRes[[comps$comp[i]]] <-
+    mibs_comp_list[[paste0(comps$comp[i])]]
+}
+
+# save results
+for (i in seq_along(DEP_TMT_limmaRes)) {
+  write.csv(
+  DEP_TMT_limmaRes[[i]],
+  file = paste0(output_dir_res,"comp_", i, "_", names(DEP_TMT_limmaRes)[i], ".csv"),
+  row.names = TRUE
+  )
+}
+```
+
+## DEP_TMT_Res
+### Directories
+```{r}
+# Directories for DEP_TMT_Res
+dir.create(paste0(MIB_graphs,"DEP_TMT_Res"))
+dir.create(paste0(MIB_output,"DEP_TMT_Res"))
+graph_dir <- paste0(MIB_graphs,"DEP_TMT_Res/")
+output_dir <- paste0(MIB_output,"DEP_TMT_Res/")
+```
+
+### Subset
+```{r}
+
+# Subset 
+TMT_samples_all
+TMT_samples_Res <- subset(TMT_samples_all,TMT_samples_all$Cell.Line %in% c("CEv3","E4","E5","G1","G5","G8","G12"))
+
+# Subset DEP object
+DEP_TMT_Res <- se_mibs_TMT_bc[,paste0(TMT_samples_Res$name)]
+
+# Save sample sheet
+write.csv(TMT_samples_Res, file=paste0(output_dir,"DEP_TMT_Res",".csv"))
+
+# Save DEP_2019_parental as RDS
+saveRDS(DEP_TMT_Res, file = paste0(output_dir,format(Sys.Date(),"%y%m%d"),"_","DEP_TMT_Res",".rds"))
+```
+
+### PCA
+```{r}
+# PCA with all genes
+
+# Create pca object
+pcaData <- PCAtools::pca(assay(DEP_TMT_Res), metadata = colData(DEP_TMT_Res))
+
+# Save pca data
+write.csv(pcaData$rotated, file =paste0(output_dir,"pcaData",".csv"))
+
+# Set colors
+color_vector <-
+    c(
+    'C' = 'black',
+    'CEv3' = 'red',
+    'E4' = 'deepskyblue4',
+    'E5' = 'turquoise3',
+    'G1' = 'purple4',
+    'G5' = 'mediumorchid',
+    'G8' = 'deeppink',
+    'G12' = 'pink2'
+    )
+
+# plot 5 pricipal components in a pairsplot
+pairsplot <- pairsplot(pcaData,
+    components = getComponents(pcaData, c(1:5)),
+    triangle = TRUE, trianglelabSize = 12,
+    hline = 0, vline = 0,
+    pointSize = 0.4,
+    gridlines.major = FALSE, gridlines.minor = FALSE,
+    colby = 'Cell.Line',
+    colkey= color_vector,
+    title = 'Pairs plot', plotaxes = FALSE,
+    legendPosition = 'none',
+    margingaps = unit(c(-0.01, -0.01, -0.01, -0.01), 'cm'))
+pairsplot
+# save graph as PDF
+ggsave(
+  filename = paste0(graph_dir,"pca_","pairsplot", ".pdf"),
+  plot = pairsplot
+  )
+
+# PCA 1
+p1 <- biplot(pcaData, x = "PC1", y = "PC2",
+       lab = NULL ,
+       colby = "Cell.Line",
+       colkey= color_vector,
+       shape = "Timepoint",
+       legendPosition = 'right' )
+p1
+# save graph as PDF
+ggsave(
+  filename = paste0(graph_dir,"pca_vsd_500_","cell_line",".pdf"),
+  plot = p1
+  )
+```
+
+### Euclidian distances
+```{r}
+# calculate sample euclidian distances
+sampleDists <- dist(t(assay(DEP_TMT_Res)))
+
+# plot sample euclidian distances via a heatmap
+sampleDistMatrix <- as.matrix( sampleDists )
+
+# Complex Heatmap annotation labels
+annotation_col<-
+  HeatmapAnnotation(df = data.frame(Model = DEP_TMT_Res@colData$Cell.Line,
+                                    Time = DEP_TMT_Res@colData$Timepoint),
+  col = list(Model =
+  c(
+    'C' = 'black',
+    'CEv3' = 'red',
+    'E4' = 'deepskyblue4',
+    'E5' = 'turquoise3',
+    'G1' = 'purple4',
+    'G5' = 'mediumorchid',
+    'G8' = 'deeppink',
+    'G12' = 'pink2'
+  ),
+  Time =
+  c(
+    '0' = 'black',
+    '4' = 'purple',
+    '24' = 'darkgreen',
+    '48' = 'darkorange'
+  ))
+  )
+
+# Heatmap of euclidian distances
+ComplexHeatmap::Heatmap(
+      sampleDistMatrix,
+      name = " ",
+      column_title = "Eculidian Distances",
+      show_column_names = FALSE,
+      show_row_names = FALSE,
+      clustering_distance_rows = "euclidean",
+      clustering_distance_columns = "euclidean",
+      clustering_method_rows = "complete",
+      clustering_method_columns = "complete",
+      col = colorRampPalette( rev(brewer.pal(9, "Blues")) )(255),
+      top_annotation = annotation_col
+    )
+```
+
+### TVG (labeled)
+```{r, fig.keep='first'}
+# DEP_TMT_Res
+
+# Directories 
+dir.create(paste0(output_dir,"Heatmap_TVG"))
+output_dir_Heatmap_TVG <- paste0(output_dir,"Heatmap_TVG/")
+dir.create(paste0(graph_dir,"Heatmap_TVG"))
+graph_dir_Heatmap_TVG <- paste0(graph_dir,"Heatmap_TVG/")
+
+# pHeatmap of Top X DEG on transformed data
+tvg <- c(100,50,25,10)
+topVarGenesX_list <- list()
+
+# pHeatmap of Top X DEG on transformed data
+
+# Extract out distances
+mat_list <- list()
+for (i in seq_along(tvg)) {
+  topVarGenesX_list[[paste0(tvg[i])]] <- head( order( rowVars( as.matrix(assay(DEP_TMT_Res)) ), decreasing=TRUE ), tvg[[i]] )
+}
+for (i in seq_along(tvg)) {
+  mat_list[[paste0(tvg[i])]] <- assay(DEP_TMT_Res)[ topVarGenesX_list[[i]], ]
+}
+
+# Heatmap annotation labels
+annotation_col<-
+  HeatmapAnnotation(df = data.frame(Model = DEP_TMT_Res@colData$Cell.Line,
+                                    Time = DEP_TMT_Res@colData$Timepoint),
+  col = list(Model =
+  c(
+    'C' = 'black',
+    'CEv3' = 'red',
+    'E4' = 'deepskyblue4',
+    'E5' = 'turquoise3',
+    'G1' = 'purple4',
+    'G5' = 'mediumorchid',
+    'G8' = 'deeppink',
+    'G12' = 'pink2'
+  ),
+  Time =
+  c(
+    '0' = 'black',
+    '4' = 'purple',
+    '24' = 'darkgreen',
+    '48' = 'darkorange'
+  ))
+  )
+
+# Generate Unlabeled Heatmap
+p_list <- list()
+for (i in seq_along(mat_list)) {
+p_list[[paste0(names(mat_list)[[i]])]] <- ComplexHeatmap::Heatmap(
+  t(scale(t(mat_list[[i]]))),
+  top_annotation = annotation_col,
+  name = " ",
+  column_title = paste0(names(mat_list)[i],"_TVG"),
+  show_column_names = F,
+  show_row_names = F
+  )
+print(p_list[[i]])
+}
+
+# Save Heatmap
+for (i in seq_along(p_list)) {
+pdf(file=paste0(graph_dir_Heatmap_TVG, "CHeatmap_"  , names(p_list)[[i]], ".pdf"))
+draw(p_list[[i]])
+dev.off()
+}
+
+
+# Generate labeled Heatmap
+p_list <- list()
+for (i in seq_along(mat_list)) {
+p_list[[paste0(names(mat_list)[[i]])]] <- ComplexHeatmap::Heatmap(
+  t(scale(t(mat_list[[i]]))),
+  #column_order=row.names(DEP_TMT_Res@colData[order(DEP_TMT_Res@colData$clid),]),
+  top_annotation = annotation_col,
+  column_split = factor(DEP_TMT_Res@colData$clid),
+  name = " ",
+  column_title = paste0(names(mat_list)[i],"_TVG"),
+  show_column_names = F,
+  show_row_names = T
+  )
+print(p_list[[i]])
+}
+
+# Save Heatmap
+for (i in seq_along(p_list)) {
+pdf(file=paste0(graph_dir_Heatmap_TVG, "CHeatmapLabel_"  , names(p_list)[[i]], ".pdf"))
+draw(p_list[[i]])
+dev.off()
+}
+
+# Graphics termination 
+if(!is.null(dev.list())) dev.off()
+if(!is.null(dev.list())) graphics.off()
+```
+#### Limma
+##### Comparisons
+```{r}
+
+# Directories 
+dir.create(paste0(output_dir,"Limma_res"))
+output_dir_res <- paste0(output_dir,"Limma_res/")
+dir.create(paste0(graph_dir,"Limma_res"))
+graph_dir_res <- paste0(graph_dir,"Limma_res/")
+
+# comps
+comps_factor <- as.vector(factor(paste0(colData(DEP_TMT_Res)$condition)))
+comps_df <- crossing(comp_num=comps_factor, comp_denom=comps_factor)
+comps_df <- subset(comps_df, as.character(comps_df$comp_num) != as.character(comps_df$comp_denom))
+
+# All comps
+comps_df_all <- comps_df
+comps_df_all <- cbind(comp_type="condition",comps_df_all)
+comps_df_all <- cbind(comp_no=1:nrow(comps_df_all),comps_df_all)
+comps_df_all$comp_name <- paste(comps_df_all$comp_num, "vs", comps_df_all$comp_denom, sep = "-")
+comps_df_all$comp <- paste(comps_df_all$comp_num,comps_df_all$comp_denom, sep="-")
+write.csv(comps_df_all, file=paste0(output_dir_res,"comps_all.csv"), col.names = T, row.names = F)
+comps_all_subset <- comps_df_all[,2:4]
+
+# Unique comps only (for only unique combo)
+comps_df_unique <- comps_df[!duplicated(t(apply(comps_df, 1, sort))), ]
+comps_df_unique <- cbind(comp_type="condition",comps_df_unique )
+comps_df_unique <- cbind(comp_no=1:nrow(comps_df_unique),comps_df_unique)
+comps_df_unique$comp_name <- paste(comps_df_unique$comp_num, "vs", comps_df_unique$comp_denom, sep = "-")
+comps_df_unique$comp <- paste(comps_df_unique$comp_num,comps_df_unique$comp_denom, sep="-")
+write.csv(comps_df_unique, file=paste0(output_dir_res,"comps_unique.csv"), col.names = T, row.names = F)
+comps_unique_subset <- comps_df_unique[,2:4]
+
+# Comp list to use (all comps)
+comps <- comps_df_all
+
+
+
+```
+
+##### DE results
+```{r}
+# Extract
+# Results
+# mibs_comp_list
+
+# Directories 
+dir.create(paste0(output_dir,"Limma_res"))
+output_dir_res <- paste0(output_dir,"Limma_res/")
+dir.create(paste0(graph_dir,"Limma_res"))
+graph_dir_res <- paste0(graph_dir,"Limma_res/")
+
+# Extract results
+DEP_TMT_limmaRes <- list()
+for (i in seq_along(comps$comp)){
+  DEP_TMT_limmaRes[[comps$comp[i]]] <-
+    mibs_comp_list[[paste0(comps$comp[i])]]
+}
+
+# save results
+for (i in seq_along(DEP_TMT_limmaRes)) {
+  write.csv(
+  DEP_TMT_limmaRes[[i]],
+  file = paste0(output_dir_res,"comp_", i, "_", names(DEP_TMT_limmaRes)[i], ".csv"),
+  row.names = TRUE
+  )
+}
+
+
+```
+
+###### Summarize Results
+```{r}
+
+
+# Directories 
+dir.create(paste0(output_dir,"Limma_res"))
+output_dir_res <- paste0(output_dir,"Limma_res/")
+dir.create(paste0(graph_dir,"Limma_res"))
+graph_dir_res <- paste0(graph_dir,"Limma_res/")
+
+# Extract comps of interest
+coi <- comps_df_all[comps_df_all$comp_denom=="CEv3_0",]
+comp_list_oi <- DEP_TMT_limmaRes[names(DEP_TMT_limmaRes) %in% coi$comp]
+comp_list_oi <- lapply(comp_list_oi,data.frame)
+
+# Label list of DF
+for (i in seq_along(comp_list_oi)){
+  colnames(comp_list_oi[[i]]) <- paste0(colnames(comp_list_oi[[i]]),"_",names(comp_list_oi)[[i]])
+  comp_list_oi[[i]]$Gene_ID <- row.names(comp_list_oi[[i]])
+}
+
+# Left_join comps of interest to 1x spreadsheet
+comp_list_oi_master <- Reduce(function(x, y) left_join(x, y, by="Gene_ID"), comp_list_oi)
+row.names(comp_list_oi_master) <- comp_list_oi_master$Gene_ID
+comp_list_oi_master <- comp_list_oi_master[,-which(colnames(comp_list_oi_master)=="Gene_ID")]
+comp_list_oi_master <- comp_list_oi_master[,-which(colnames(comp_list_oi_master)%in% paste0(grep("gene_",colnames(comp_list_oi_master), value = T)))]
+
+# Subset to spreadsheets
+comp_list_oi_padj <- comp_list_oi_master[,grep("adj.P.Val_", colnames(comp_list_oi_master))]
+comp_list_oi_pvalue <- comp_list_oi_master[,grep("P.Value_", colnames(comp_list_oi_master))]
+comp_list_oi_l2fc <- comp_list_oi_master[,grep("logFC_", colnames(comp_list_oi_master))]
+
+# Save spreadsheets
+write.csv(comp_list_oi_padj, file = paste0(output_dir_res,"All_coi_","padj",".csv"))
+write.csv(comp_list_oi_pvalue, file = paste0(output_dir_res,"All_coi_","pvalue",".csv"))
+write.csv(comp_list_oi_l2fc, file = paste0(output_dir_res,"All_coi_","l2fc",".csv"))
+
+```
+
+###### Volcano Plots
+```{r, fig.keep='first'}
+
+# Directory for volcano plots
+dir.create(paste0(graph_dir,"/","volcano"))
+graph_dir_vol <- paste0(graph_dir,"volcano/")
+
+# Plot Volcano
+volcano_plots_ls <- list()
+for (i in seq_along(DEP_TMT_limmaRes)){
+  plot(volcano_plots_ls[[names(DEP_TMT_limmaRes)[i]]] <- 
+    EnhancedVolcano(
+      DEP_TMT_limmaRes[[i]], 
+      lab=row.names(DEP_TMT_limmaRes[[i]]),
+      x="logFC",
+      y="adj.P.Val",
+      title= paste0("MIBs ",names(DEP_TMT_limmaRes)[[i]]),
+      pCutoff =qval, 
+      FCcutoff =lfc,
+      pointSize = 2.0, 
+      labSize = 3.0 
+    ))}
+
+# Save Volcano
+for (i in seq_along(volcano_plots_ls)){
+ggsave(filename = paste0(graph_dir_vol,"comp_", i, "_", names(volcano_plots_ls)[[i]],".pdf"), plot=volcano_plots_ls[[i]])
+}
+
+# Graphics termination 
+if(!is.null(dev.list())) dev.off()
+if(!is.null(dev.list())) graphics.off()
+
+
+```
+
+## DEP_TMT_Par
+### Directories
+```{r}
+# Directories for DEP_TMT_Par
+dir.create(paste0(MIB_graphs,"DEP_TMT_Par"))
+dir.create(paste0(MIB_output,"DEP_TMT_Par"))
+graph_dir <- paste0(MIB_graphs,"DEP_TMT_Par/")
+output_dir <- paste0(MIB_output,"DEP_TMT_Par/")
+```
+
+### Subset
+```{r}
+
+# Subset 
+TMT_samples_all
+TMT_samples_Par <- subset(TMT_samples_all,TMT_samples_all$Cell.Line %in% c("C","CEv3"))
+
+# Subset DEP object
+DEP_TMT_Par <- se_mibs_TMT_bc[,paste0(TMT_samples_Par$name)]
+
+# Save sample sheet
+write.csv(TMT_samples_Par, file=paste0(output_dir,"DEP_TMT_Par",".csv"))
+
+# Save DEP_2019_parental as RDS
+saveRDS(DEP_TMT_Par, file = paste0(output_dir,format(Sys.Date(),"%y%m%d"),"_","DEP_TMT_Par",".rds"))
+```
+
+### PCA
+```{r}
+# PCA with all genes
+
+# Create pca object
+pcaData <- PCAtools::pca(assay(DEP_TMT_Par), metadata = colData(DEP_TMT_Par))
+
+# Save pca data
+write.csv(pcaData$rotated, file =paste0(output_dir,"pcaData",".csv"))
+
+# Set colors
+color_vector <-
+    c(
+    'C' = 'black',
+    'CEv3' = 'red',
+    'E4' = 'deepskyblue4',
+    'E5' = 'turquoise3',
+    'G1' = 'purple4',
+    'G5' = 'mediumorchid',
+    'G8' = 'deeppink',
+    'G12' = 'pink2'
+    )
+
+# plot 5 pricipal components in a pairsplot
+pairsplot <- pairsplot(pcaData,
+    components = getComponents(pcaData, c(1:5)),
+    triangle = TRUE, trianglelabSize = 12,
+    hline = 0, vline = 0,
+    pointSize = 0.4,
+    gridlines.major = FALSE, gridlines.minor = FALSE,
+    colby = 'Cell.Line',
+    colkey= color_vector,
+    title = 'Pairs plot', plotaxes = FALSE,
+    legendPosition = 'none',
+    margingaps = unit(c(-0.01, -0.01, -0.01, -0.01), 'cm'))
+pairsplot
+# save graph as PDF
+ggsave(
+  filename = paste0(graph_dir,"pca_","pairsplot", ".pdf"),
+  plot = pairsplot
+  )
+
+# PCA 1
+p1 <- biplot(pcaData, x = "PC1", y = "PC2",
+       lab = NULL ,
+       colby = "Cell.Line",
+       colkey= color_vector,
+       shape = "Timepoint",
+       legendPosition = 'right' )
+p1
+# save graph as PDF
+ggsave(
+  filename = paste0(graph_dir,"pca_vsd_500_","cell_line",".pdf"),
+  plot = p1
+  )
+```
+
+### Euclidian distances
+```{r}
+# calculate sample euclidian distances
+sampleDists <- dist(t(assay(DEP_TMT_Par)))
+
+# plot sample euclidian distances via a heatmap
+sampleDistMatrix <- as.matrix( sampleDists )
+
+# Complex Heatmap annotation labels
+annotation_col<-
+  HeatmapAnnotation(df = data.frame(Model = DEP_TMT_Par@colData$Cell.Line,
+                                    Time = DEP_TMT_Par@colData$Timepoint),
+  col = list(Model =
+  c(
+    'C' = 'black',
+    'CEv3' = 'red',
+    'E4' = 'deepskyblue4',
+    'E5' = 'turquoise3',
+    'G1' = 'purple4',
+    'G5' = 'mediumorchid',
+    'G8' = 'deeppink',
+    'G12' = 'pink2'
+  ),
+  Time =
+  c(
+    '0' = 'black',
+    '4' = 'purple',
+    '24' = 'darkgreen',
+    '48' = 'darkorange'
+  ))
+  )
+
+# Heatmap of euclidian distances
+ComplexHeatmap::Heatmap(
+      sampleDistMatrix,
+      name = " ",
+      column_title = "Eculidian Distances",
+      show_column_names = FALSE,
+      show_row_names = FALSE,
+      clustering_distance_rows = "euclidean",
+      clustering_distance_columns = "euclidean",
+      clustering_method_rows = "complete",
+      clustering_method_columns = "complete",
+      col = colorRampPalette( rev(brewer.pal(9, "Blues")) )(255),
+      top_annotation = annotation_col
+    )
+```
+
+### TVG (labeled)
+```{r, fig.keep='first'}
+# DEP_TMT_Par
+
+# Directories 
+dir.create(paste0(output_dir,"Heatmap_TVG"))
+output_dir_Heatmap_TVG <- paste0(output_dir,"Heatmap_TVG/")
+dir.create(paste0(graph_dir,"Heatmap_TVG"))
+graph_dir_Heatmap_TVG <- paste0(graph_dir,"Heatmap_TVG/")
+
+# pHeatmap of Top X DEG on transformed data
+tvg <- c(100,50,25,10)
+topVarGenesX_list <- list()
+
+# pHeatmap of Top X DEG on transformed data
+
+# Extract out distances
+mat_list <- list()
+for (i in seq_along(tvg)) {
+  topVarGenesX_list[[paste0(tvg[i])]] <- head( order( rowVars( as.matrix(assay(DEP_TMT_Par)) ), decreasing=TRUE ), tvg[[i]] )
+}
+for (i in seq_along(tvg)) {
+  mat_list[[paste0(tvg[i])]] <- assay(DEP_TMT_Par)[ topVarGenesX_list[[i]], ]
+}
+
+# Heatmap annotation labels
+annotation_col<-
+  HeatmapAnnotation(df = data.frame(Model = DEP_TMT_Par@colData$Cell.Line,
+                                    Time = DEP_TMT_Par@colData$Timepoint),
+  col = list(Model =
+  c(
+    'C' = 'black',
+    'CEv3' = 'red',
+    'E4' = 'deepskyblue4',
+    'E5' = 'turquoise3',
+    'G1' = 'purple4',
+    'G5' = 'mediumorchid',
+    'G8' = 'deeppink',
+    'G12' = 'pink2'
+  ),
+  Time =
+  c(
+    '0' = 'black',
+    '4' = 'purple',
+    '24' = 'darkgreen',
+    '48' = 'darkorange'
+  ))
+  )
+
+# Generate Unlabeled Heatmap
+p_list <- list()
+for (i in seq_along(mat_list)) {
+p_list[[paste0(names(mat_list)[[i]])]] <- ComplexHeatmap::Heatmap(
+  t(scale(t(mat_list[[i]]))),
+  top_annotation = annotation_col,
+  name = " ",
+  column_title = paste0(names(mat_list)[i],"_TVG"),
+  show_column_names = F,
+  show_row_names = F
+  )
+print(p_list[[i]])
+}
+
+# Save Heatmap
+for (i in seq_along(p_list)) {
+pdf(file=paste0(graph_dir_Heatmap_TVG, "CHeatmap_"  , names(p_list)[[i]], ".pdf"))
+draw(p_list[[i]])
+dev.off()
+}
+
+
+# Generate labeled Heatmap
+p_list <- list()
+for (i in seq_along(mat_list)) {
+p_list[[paste0(names(mat_list)[[i]])]] <- ComplexHeatmap::Heatmap(
+  t(scale(t(mat_list[[i]]))),
+  #column_order=row.names(DEP_TMT_Par@colData[order(DEP_TMT_Par@colData$clid),]),
+  top_annotation = annotation_col,
+  column_split = factor(DEP_TMT_Par@colData$clid),
+  name = " ",
+  column_title = paste0(names(mat_list)[i],"_TVG"),
+  show_column_names = F,
+  show_row_names = T
+  )
+print(p_list[[i]])
+}
+
+# Save Heatmap
+for (i in seq_along(p_list)) {
+pdf(file=paste0(graph_dir_Heatmap_TVG, "CHeatmapLabel_"  , names(p_list)[[i]], ".pdf"))
+draw(p_list[[i]])
+dev.off()
+}
+
+# Graphics termination 
+if(!is.null(dev.list())) dev.off()
+if(!is.null(dev.list())) graphics.off()
+```
+#### Limma
+##### Comparisons
+```{r}
+
+# Directories 
+dir.create(paste0(output_dir,"Limma_res"))
+output_dir_res <- paste0(output_dir,"Limma_res/")
+dir.create(paste0(graph_dir,"Limma_res"))
+graph_dir_res <- paste0(graph_dir,"Limma_res/")
+
+# comps
+comps_factor <- as.vector(factor(paste0(colData(DEP_TMT_Par)$condition)))
+comps_df <- crossing(comp_num=comps_factor, comp_denom=comps_factor)
+comps_df <- subset(comps_df, as.character(comps_df$comp_num) != as.character(comps_df$comp_denom))
+
+# All comps
+comps_df_all <- comps_df
+comps_df_all <- cbind(comp_type="condition",comps_df_all)
+comps_df_all <- cbind(comp_no=1:nrow(comps_df_all),comps_df_all)
+comps_df_all$comp_name <- paste(comps_df_all$comp_num, "vs", comps_df_all$comp_denom, sep = "-")
+comps_df_all$comp <- paste(comps_df_all$comp_num,comps_df_all$comp_denom, sep="-")
+write.csv(comps_df_all, file=paste0(output_dir_res,"comps_all.csv"), col.names = T, row.names = F)
+comps_all_subset <- comps_df_all[,2:4]
+
+# Unique comps only (for only unique combo)
+comps_df_unique <- comps_df[!duplicated(t(apply(comps_df, 1, sort))), ]
+comps_df_unique <- cbind(comp_type="condition",comps_df_unique )
+comps_df_unique <- cbind(comp_no=1:nrow(comps_df_unique),comps_df_unique)
+comps_df_unique$comp_name <- paste(comps_df_unique$comp_num, "vs", comps_df_unique$comp_denom, sep = "-")
+comps_df_unique$comp <- paste(comps_df_unique$comp_num,comps_df_unique$comp_denom, sep="-")
+write.csv(comps_df_unique, file=paste0(output_dir_res,"comps_unique.csv"), col.names = T, row.names = F)
+comps_unique_subset <- comps_df_unique[,2:4]
+
+# Comp list to use (all comps)
+comps <- comps_df_all
+
+
+
+```
+
+##### DE results
+```{r}
+# Extract
+# Results
+# mibs_comp_list
+
+# Directories 
+dir.create(paste0(output_dir,"Limma_res"))
+output_dir_res <- paste0(output_dir,"Limma_res/")
+dir.create(paste0(graph_dir,"Limma_res"))
+graph_dir_res <- paste0(graph_dir,"Limma_res/")
+
+# Extract results
+DEP_TMT_limmaRes <- list()
+for (i in seq_along(comps$comp)){
+  DEP_TMT_limmaRes[[comps$comp[i]]] <-
+    mibs_comp_list[[paste0(comps$comp[i])]]
+}
+
+# save results
+for (i in seq_along(DEP_TMT_limmaRes)) {
+  write.csv(
+  DEP_TMT_limmaRes[[i]],
+  file = paste0(output_dir_res,"comp_", i, "_", names(DEP_TMT_limmaRes)[i], ".csv"),
+  row.names = TRUE
+  )
+}
+
+
+```
+
+###### Summarize Results
+```{r}
+
+
+# Directories 
+dir.create(paste0(output_dir,"Limma_res"))
+output_dir_res <- paste0(output_dir,"Limma_res/")
+dir.create(paste0(graph_dir,"Limma_res"))
+graph_dir_res <- paste0(graph_dir,"Limma_res/")
+
+# Extract comps of interest
+coi <- comps_df_all[comps_df_all$comp_denom=="C_0",]
+comp_list_oi <- DEP_TMT_limmaRes[names(DEP_TMT_limmaRes) %in% coi$comp]
+comp_list_oi <- lapply(comp_list_oi,data.frame)
+
+# Label list of DF
+for (i in seq_along(comp_list_oi)){
+  colnames(comp_list_oi[[i]]) <- paste0(colnames(comp_list_oi[[i]]),"_",names(comp_list_oi)[[i]])
+  comp_list_oi[[i]]$Gene_ID <- row.names(comp_list_oi[[i]])
+}
+
+# Left_join comps of interest to 1x spreadsheet
+comp_list_oi_master <- Reduce(function(x, y) left_join(x, y, by="Gene_ID"), comp_list_oi)
+row.names(comp_list_oi_master) <- comp_list_oi_master$Gene_ID
+comp_list_oi_master <- comp_list_oi_master[,-which(colnames(comp_list_oi_master)=="Gene_ID")]
+comp_list_oi_master <- comp_list_oi_master[,-which(colnames(comp_list_oi_master)%in% paste0(grep("gene_",colnames(comp_list_oi_master), value = T)))]
+
+# Subset to spreadsheets
+comp_list_oi_padj <- comp_list_oi_master[,grep("adj.P.Val_", colnames(comp_list_oi_master))]
+comp_list_oi_pvalue <- comp_list_oi_master[,grep("P.Value_", colnames(comp_list_oi_master))]
+comp_list_oi_l2fc <- comp_list_oi_master[,grep("logFC_", colnames(comp_list_oi_master))]
+
+# Save spreadsheets
+write.csv(comp_list_oi_padj, file = paste0(output_dir_res,"All_coi_","padj",".csv"))
+write.csv(comp_list_oi_pvalue, file = paste0(output_dir_res,"All_coi_","pvalue",".csv"))
+write.csv(comp_list_oi_l2fc, file = paste0(output_dir_res,"All_coi_","l2fc",".csv"))
+
+```
+
+###### Volcano Plots
+```{r, fig.keep='first'}
+
+# Directory for volcano plots
+dir.create(paste0(graph_dir,"/","volcano"))
+graph_dir_vol <- paste0(graph_dir,"volcano/")
+
+# Plot Volcano
+volcano_plots_ls <- list()
+for (i in seq_along(DEP_TMT_limmaRes)){
+  plot(volcano_plots_ls[[names(DEP_TMT_limmaRes)[i]]] <- 
+    EnhancedVolcano(
+      DEP_TMT_limmaRes[[i]], 
+      lab=row.names(DEP_TMT_limmaRes[[i]]),
+      x="logFC",
+      y="adj.P.Val",
+      title= paste0("MIBs ",names(DEP_TMT_limmaRes)[[i]]),
+      pCutoff =qval, 
+      FCcutoff =lfc,
+      pointSize = 2.0, 
+      labSize = 3.0 
+    ))}
+
+# Save Volcano
+for (i in seq_along(volcano_plots_ls)){
+ggsave(filename = paste0(graph_dir_vol,"comp_", i, "_", names(volcano_plots_ls)[[i]],".pdf"), plot=volcano_plots_ls[[i]])
+}
+
+# Graphics termination 
+if(!is.null(dev.list())) dev.off()
+if(!is.null(dev.list())) graphics.off()
+
+
+```
+
+## DEP_TMT_BL_Res
+### Directories
+```{r}
+# Directories for DEP_TMT_BL_Res
+dir.create(paste0(MIB_graphs,"DEP_TMT_BL_Res"))
+dir.create(paste0(MIB_output,"DEP_TMT_BL_Res"))
+graph_dir <- paste0(MIB_graphs,"DEP_TMT_BL_Res/")
+output_dir <- paste0(MIB_output,"DEP_TMT_BL_Res/")
+```
+
+### Subset
+```{r}
+
+# Subset 
+TMT_samples_all
+TMT_samples_BL_Res <- subset(TMT_samples_all,TMT_samples_all$Cell.Line %in% c("CEv3","E4","E5","G1","G5","G8","G12") & TMT_samples_all$Timepoint=="0" )
+
+# Subset DEP object
+DEP_TMT_BL_Res <- se_mibs_TMT_bc[,paste0(TMT_samples_BL_Res$name)]
+
+# Save sample sheet
+write.csv(TMT_samples_BL_Res, file=paste0(output_dir,"DEP_TMT_BL_Res",".csv"))
+
+# Save DEP_2019_parental as RDS
+saveRDS(DEP_TMT_BL_Res, file = paste0(output_dir,format(Sys.Date(),"%y%m%d"),"_","DEP_TMT_BL_Res",".rds"))
+```
+
+### PCA
+```{r}
+# PCA with all genes
+
+# Create pca object
+pcaData <- PCAtools::pca(assay(DEP_TMT_BL_Res), metadata = colData(DEP_TMT_BL_Res))
+
+# Save pca data
+write.csv(pcaData$rotated, file =paste0(output_dir,"pcaData",".csv"))
+
+# Set colors
+color_vector <-
+    c(
+    'C' = 'black',
+    'CEv3' = 'red',
+    'E4' = 'deepskyblue4',
+    'E5' = 'turquoise3',
+    'G1' = 'purple4',
+    'G5' = 'mediumorchid',
+    'G8' = 'deeppink',
+    'G12' = 'pink2'
+    )
+
+# plot 5 pricipal components in a pairsplot
+pairsplot <- pairsplot(pcaData,
+    components = getComponents(pcaData, c(1:5)),
+    triangle = TRUE, trianglelabSize = 12,
+    hline = 0, vline = 0,
+    pointSize = 0.4,
+    gridlines.major = FALSE, gridlines.minor = FALSE,
+    colby = 'Cell.Line',
+    colkey= color_vector,
+    title = 'Pairs plot', plotaxes = FALSE,
+    legendPosition = 'none',
+    margingaps = unit(c(-0.01, -0.01, -0.01, -0.01), 'cm'))
+pairsplot
+# save graph as PDF
+ggsave(
+  filename = paste0(graph_dir,"pca_","pairsplot", ".pdf"),
+  plot = pairsplot
+  )
+
+# PCA 1
+p1 <- biplot(pcaData, x = "PC1", y = "PC2",
+       lab = NULL ,
+       colby = "Cell.Line",
+       colkey= color_vector,
+       shape = "Timepoint",
+       legendPosition = 'right' )
+p1
+# save graph as PDF
+ggsave(
+  filename = paste0(graph_dir,"pca_vsd_500_","cell_line",".pdf"),
+  plot = p1
+  )
+```
+
+### Euclidian distances
+```{r}
+# calculate sample euclidian distances
+sampleDists <- dist(t(assay(DEP_TMT_BL_Res)))
+
+# plot sample euclidian distances via a heatmap
+sampleDistMatrix <- as.matrix( sampleDists )
+
+# Complex Heatmap annotation labels
+annotation_col<-
+  HeatmapAnnotation(df = data.frame(Model = DEP_TMT_BL_Res@colData$Cell.Line,
+                                    Time = DEP_TMT_BL_Res@colData$Timepoint),
+  col = list(Model =
+  c(
+    'C' = 'black',
+    'CEv3' = 'red',
+    'E4' = 'deepskyblue4',
+    'E5' = 'turquoise3',
+    'G1' = 'purple4',
+    'G5' = 'mediumorchid',
+    'G8' = 'deeppink',
+    'G12' = 'pink2'
+  ),
+  Time =
+  c(
+    '0' = 'black',
+    '4' = 'purple',
+    '24' = 'darkgreen',
+    '48' = 'darkorange'
+  ))
+  )
+
+# Heatmap of euclidian distances
+ComplexHeatmap::Heatmap(
+      sampleDistMatrix,
+      name = " ",
+      column_title = "Eculidian Distances",
+      show_column_names = FALSE,
+      show_row_names = FALSE,
+      clustering_distance_rows = "euclidean",
+      clustering_distance_columns = "euclidean",
+      clustering_method_rows = "complete",
+      clustering_method_columns = "complete",
+      col = colorRampPalette( rev(brewer.pal(9, "Blues")) )(255),
+      top_annotation = annotation_col
+    )
+```
+
+### TVG (labeled)
+```{r, fig.keep='first'}
+# DEP_TMT_BL_Res
+
+# Directories 
+dir.create(paste0(output_dir,"Heatmap_TVG"))
+output_dir_Heatmap_TVG <- paste0(output_dir,"Heatmap_TVG/")
+dir.create(paste0(graph_dir,"Heatmap_TVG"))
+graph_dir_Heatmap_TVG <- paste0(graph_dir,"Heatmap_TVG/")
+
+# pHeatmap of Top X DEG on transformed data
+tvg <- c(100,50,25,10)
+topVarGenesX_list <- list()
+
+# pHeatmap of Top X DEG on transformed data
+
+# Extract out distances
+mat_list <- list()
+for (i in seq_along(tvg)) {
+  topVarGenesX_list[[paste0(tvg[i])]] <- head( order( rowVars( as.matrix(assay(DEP_TMT_BL_Res)) ), decreasing=TRUE ), tvg[[i]] )
+}
+for (i in seq_along(tvg)) {
+  mat_list[[paste0(tvg[i])]] <- assay(DEP_TMT_BL_Res)[ topVarGenesX_list[[i]], ]
+}
+
+# Heatmap annotation labels
+annotation_col<-
+  HeatmapAnnotation(df = data.frame(Model = DEP_TMT_BL_Res@colData$Cell.Line,
+                                    Time = DEP_TMT_BL_Res@colData$Timepoint),
+  col = list(Model =
+  c(
+    'C' = 'black',
+    'CEv3' = 'red',
+    'E4' = 'deepskyblue4',
+    'E5' = 'turquoise3',
+    'G1' = 'purple4',
+    'G5' = 'mediumorchid',
+    'G8' = 'deeppink',
+    'G12' = 'pink2'
+  ),
+  Time =
+  c(
+    '0' = 'black',
+    '4' = 'purple',
+    '24' = 'darkgreen',
+    '48' = 'darkorange'
+  ))
+  )
+
+# Generate Unlabeled Heatmap
+p_list <- list()
+for (i in seq_along(mat_list)) {
+p_list[[paste0(names(mat_list)[[i]])]] <- ComplexHeatmap::Heatmap(
+  t(scale(t(mat_list[[i]]))),
+  top_annotation = annotation_col,
+  name = " ",
+  column_title = paste0(names(mat_list)[i],"_TVG"),
+  show_column_names = F,
+  show_row_names = F
+  )
+print(p_list[[i]])
+}
+
+# Save Heatmap
+for (i in seq_along(p_list)) {
+pdf(file=paste0(graph_dir_Heatmap_TVG, "CHeatmap_"  , names(p_list)[[i]], ".pdf"))
+draw(p_list[[i]])
+dev.off()
+}
+
+
+# Generate labeled Heatmap
+p_list <- list()
+for (i in seq_along(mat_list)) {
+p_list[[paste0(names(mat_list)[[i]])]] <- ComplexHeatmap::Heatmap(
+  t(scale(t(mat_list[[i]]))),
+  #column_order=row.names(DEP_TMT_BL_Res@colData[order(DEP_TMT_BL_Res@colData$clid),]),
+  top_annotation = annotation_col,
+  column_split = factor(DEP_TMT_BL_Res@colData$clid),
+  name = " ",
+  column_title = paste0(names(mat_list)[i],"_TVG"),
+  show_column_names = F,
+  show_row_names = T
+  )
+print(p_list[[i]])
+}
+
+# Save Heatmap
+for (i in seq_along(p_list)) {
+pdf(file=paste0(graph_dir_Heatmap_TVG, "CHeatmapLabel_"  , names(p_list)[[i]], ".pdf"))
+draw(p_list[[i]])
+dev.off()
+}
+
+# Graphics termination 
+if(!is.null(dev.list())) dev.off()
+if(!is.null(dev.list())) graphics.off()
+```
+#### Limma
+##### Comparisons
+```{r}
+
+# Directories 
+dir.create(paste0(output_dir,"Limma_res"))
+output_dir_res <- paste0(output_dir,"Limma_res/")
+dir.create(paste0(graph_dir,"Limma_res"))
+graph_dir_res <- paste0(graph_dir,"Limma_res/")
+
+# comps
+comps_factor <- as.vector(factor(paste0(colData(DEP_TMT_BL_Res)$condition)))
+comps_df <- crossing(comp_num=comps_factor, comp_denom=comps_factor)
+comps_df <- subset(comps_df, as.character(comps_df$comp_num) != as.character(comps_df$comp_denom))
+
+# All comps
+comps_df_all <- comps_df
+comps_df_all <- cbind(comp_type="condition",comps_df_all)
+comps_df_all <- cbind(comp_no=1:nrow(comps_df_all),comps_df_all)
+comps_df_all$comp_name <- paste(comps_df_all$comp_num, "vs", comps_df_all$comp_denom, sep = "-")
+comps_df_all$comp <- paste(comps_df_all$comp_num,comps_df_all$comp_denom, sep="-")
+write.csv(comps_df_all, file=paste0(output_dir_res,"comps_all.csv"), col.names = T, row.names = F)
+comps_all_subset <- comps_df_all[,2:4]
+
+# Unique comps only (for only unique combo)
+comps_df_unique <- comps_df[!duplicated(t(apply(comps_df, 1, sort))), ]
+comps_df_unique <- cbind(comp_type="condition",comps_df_unique )
+comps_df_unique <- cbind(comp_no=1:nrow(comps_df_unique),comps_df_unique)
+comps_df_unique$comp_name <- paste(comps_df_unique$comp_num, "vs", comps_df_unique$comp_denom, sep = "-")
+comps_df_unique$comp <- paste(comps_df_unique$comp_num,comps_df_unique$comp_denom, sep="-")
+write.csv(comps_df_unique, file=paste0(output_dir_res,"comps_unique.csv"), col.names = T, row.names = F)
+comps_unique_subset <- comps_df_unique[,2:4]
+
+# Comp list to use (all comps)
+comps <- comps_df_all
+
+
+
+```
+
+##### DE results
+```{r}
+# Extract
+# Results
+# mibs_comp_list
+
+# Directories 
+dir.create(paste0(output_dir,"Limma_res"))
+output_dir_res <- paste0(output_dir,"Limma_res/")
+dir.create(paste0(graph_dir,"Limma_res"))
+graph_dir_res <- paste0(graph_dir,"Limma_res/")
+
+# Extract results
+DEP_TMT_limmaRes <- list()
+for (i in seq_along(comps$comp)){
+  DEP_TMT_limmaRes[[comps$comp[i]]] <-
+    mibs_comp_list[[paste0(comps$comp[i])]]
+}
+
+# save results
+for (i in seq_along(DEP_TMT_limmaRes)) {
+  write.csv(
+  DEP_TMT_limmaRes[[i]],
+  file = paste0(output_dir_res,"comp_", i, "_", names(DEP_TMT_limmaRes)[i], ".csv"),
+  row.names = TRUE
+  )
+}
+
+
+```
+
+###### Summarize Results
+```{r}
+
+
+# Directories 
+dir.create(paste0(output_dir,"Limma_res"))
+output_dir_res <- paste0(output_dir,"Limma_res/")
+dir.create(paste0(graph_dir,"Limma_res"))
+graph_dir_res <- paste0(graph_dir,"Limma_res/")
+
+# Extract comps of interest
+coi <- comps_df_all[comps_df_all$comp_denom=="CEv3_0",]
+comp_list_oi <- DEP_TMT_limmaRes[names(DEP_TMT_limmaRes) %in% coi$comp]
+comp_list_oi <- lapply(comp_list_oi,data.frame)
+
+# Label list of DF
+for (i in seq_along(comp_list_oi)){
+  colnames(comp_list_oi[[i]]) <- paste0(colnames(comp_list_oi[[i]]),"_",names(comp_list_oi)[[i]])
+  comp_list_oi[[i]]$Gene_ID <- row.names(comp_list_oi[[i]])
+}
+
+# Left_join comps of interest to 1x spreadsheet
+comp_list_oi_master <- Reduce(function(x, y) left_join(x, y, by="Gene_ID"), comp_list_oi)
+row.names(comp_list_oi_master) <- comp_list_oi_master$Gene_ID
+comp_list_oi_master <- comp_list_oi_master[,-which(colnames(comp_list_oi_master)=="Gene_ID")]
+comp_list_oi_master <- comp_list_oi_master[,-which(colnames(comp_list_oi_master)%in% paste0(grep("gene_",colnames(comp_list_oi_master), value = T)))]
+
+# Subset to spreadsheets
+comp_list_oi_padj <- comp_list_oi_master[,grep("adj.P.Val_", colnames(comp_list_oi_master))]
+comp_list_oi_pvalue <- comp_list_oi_master[,grep("P.Value_", colnames(comp_list_oi_master))]
+comp_list_oi_l2fc <- comp_list_oi_master[,grep("logFC_", colnames(comp_list_oi_master))]
+
+# Save spreadsheets
+write.csv(comp_list_oi_padj, file = paste0(output_dir_res,"All_coi_","padj",".csv"))
+write.csv(comp_list_oi_pvalue, file = paste0(output_dir_res,"All_coi_","pvalue",".csv"))
+write.csv(comp_list_oi_l2fc, file = paste0(output_dir_res,"All_coi_","l2fc",".csv"))
+
+```
+
+###### Volcano Plots
+```{r, fig.keep='first'}
+
+# Directory for volcano plots
+dir.create(paste0(graph_dir,"/","volcano"))
+graph_dir_vol <- paste0(graph_dir,"volcano/")
+
+# Plot Volcano
+volcano_plots_ls <- list()
+for (i in seq_along(DEP_TMT_limmaRes)){
+  plot(volcano_plots_ls[[names(DEP_TMT_limmaRes)[i]]] <- 
+    EnhancedVolcano(
+      DEP_TMT_limmaRes[[i]], 
+      lab=row.names(DEP_TMT_limmaRes[[i]]),
+      x="logFC",
+      y="adj.P.Val",
+      title= paste0("MIBs ",names(DEP_TMT_limmaRes)[[i]]),
+      pCutoff =qval, 
+      FCcutoff =lfc,
+      pointSize = 2.0, 
+      labSize = 3.0 
+    ))}
+
+# Save Volcano
+for (i in seq_along(volcano_plots_ls)){
+ggsave(filename = paste0(graph_dir_vol,"comp_", i, "_", names(volcano_plots_ls)[[i]],".pdf"), plot=volcano_plots_ls[[i]])
+}
+
+# Graphics termination 
+if(!is.null(dev.list())) dev.off()
+if(!is.null(dev.list())) graphics.off()
+
+
+```
+
+## DEP_TMT_EDA
+#### Directories
+```{r}
+# Directories for DEP_TMT_EDA
+dir.create(paste0(MIB_graphs,"DEP_TMT_EDA"))
+dir.create(paste0(MIB_output,"DEP_TMT_EDA"))
+graph_dir <- paste0(MIB_graphs,"DEP_TMT_EDA/")
+output_dir <- paste0(MIB_output,"DEP_TMT_EDA/")
+```
+
+
+#### Subset
+```{r}
+# Sample sheet
+TMT_samples_all 
+
+# Subset by cell line
+TMT_samples_EDA_ls <- list()
+for ( i in unique(TMT_samples_all$Cell.Line)){
+  TMT_samples_EDA_ls[[i]] <-
+  subset(TMT_samples_all, TMT_samples_all$Cell.Line==paste0(i))
+}
+
+# Add additional groups 
+TMT_samples_EDA_ls <- c(TMT_samples_EDA_ls,
+                        list(
+                          TMT_samples_BL_Res=TMT_samples_BL_Res,
+                          TMT_samples_Res=TMT_samples_Res,
+                          TMT_samples_Par=TMT_samples_Par
+                        ))
+
+
+# Save sample sheet
+for (i in seq_along(TMT_samples_EDA_ls)){
+  dir.create(paste0(graph_dir,names(TMT_samples_EDA_ls)[i]))
+  dir.create(paste0(output_dir,names(TMT_samples_EDA_ls)[i]))
+  write.csv(TMT_samples_EDA_ls[[i]], file=paste0(output_dir,names(TMT_samples_EDA_ls)[i],"/TMT_samples",".csv"))
+}
+
+# Imputed values for TMT
+se_mibs_TMT_mv
+
+# Save as RDS
+saveRDS(se_mibs_TMT_mv, file = paste0(output_dir,format(Sys.Date(),"%y%m%d"),"_","se_mibs_TMT_mv",".rds"))
+
+# Batch corrected values for TMT
+se_mibs_TMT_bc
+
+# Save as RDS
+saveRDS(se_mibs_TMT_bc, file = paste0(output_dir,format(Sys.Date(),"%y%m%d"),"_","se_mibs_TMT_bc",".rds"))
+
+# Generate se subsets for DEP EDA
+DEP_TMT_EDA_mv_ls <- list()
+DEP_TMT_EDA_bc_ls <- list()
+for (i in seq_along(TMT_samples_EDA_ls)){
+  
+  # Generate se object for imputed missing values
+  DEP_TMT_EDA_mv_ls[[names(TMT_samples_EDA_ls)[i]]] <-
+    se_mibs_TMT_mv[,paste0(TMT_samples_EDA_ls[[i]]$condition,"_",TMT_samples_EDA_ls[[i]]$replicate)]
+  # Save as RDS
+  saveRDS(DEP_TMT_EDA_mv_ls[[names(TMT_samples_EDA_ls)[i]]], file = paste0(output_dir,names(TMT_samples_EDA_ls)[i],"/",format(Sys.Date(),"%y%m%d"),"_",names(TMT_samples_EDA_ls)[i],"_mv_",".rds"))
+ 
+   # Generate se object for batch corrected values
+  DEP_TMT_EDA_bc_ls[[names(TMT_samples_EDA_ls)[i]]] <-
+    se_mibs_TMT_bc[,paste0(TMT_samples_EDA_ls[[i]]$condition,"_",TMT_samples_EDA_ls[[i]]$replicate)]
+  # Save as RDS
+  saveRDS(DEP_TMT_EDA_bc_ls[[names(TMT_samples_EDA_ls)[i]]], file = paste0(output_dir,names(TMT_samples_EDA_ls)[i],"/",format(Sys.Date(),"%y%m%d"),"_",names(TMT_samples_EDA_ls)[i],"_bc_",".rds"))
+  
+  # Save imputed(raw) and batch corrected (norm) norm counts
+  norm_counts <- as.data.frame(assay(DEP_TMT_EDA_bc_ls[[names(TMT_samples_EDA_ls)[i]]]))
+  raw_counts <- as.data.frame(assay(DEP_TMT_EDA_mv_ls[[names(TMT_samples_EDA_ls)[i]]]))
+
+  write.csv(
+  norm_counts,
+  file=paste0(output_dir,names(TMT_samples_EDA_ls)[i],"/","norm_counts",".csv"),
+  row.names = TRUE
+  )
+
+  write.csv(
+  raw_counts,
+  file=paste0(output_dir,names(TMT_samples_EDA_ls)[i],"/","raw_counts",".csv"),
+  row.names = TRUE
+  )
+}
+
+# Save as RDS
+saveRDS(DEP_TMT_EDA_mv_ls, file = paste0(output_dir,format(Sys.Date(),"%y%m%d"),"_","DEP_TMT_EDA_mv_ls",".rds"))
+
+# Save as RDS
+saveRDS(DEP_TMT_EDA_bc_ls, file = paste0(output_dir,format(Sys.Date(),"%y%m%d"),"_","DEP_TMT_EDA_bc_ls",".rds"))
+
+```
+
+#### PCA
+```{r}
+# PCA with all genes
+
+# BC PCA
+for(h in seq_along(DEP_TMT_EDA_bc_ls)){
+  
+  # Directories
+  PCA_graph <- paste0(graph_dir,names(DEP_TMT_EDA_bc_ls)[h],"/")
+  PCA_output <- paste0(output_dir,names(DEP_TMT_EDA_bc_ls)[h],"/")
+  
+  # Extract single
+  DEP_bc <- DEP_TMT_EDA_bc_ls[[h]]
+  
+  # Create pca object
+  pcaData <- PCAtools::pca(assay(DEP_bc), metadata = colData(DEP_bc))
+  
+  # Save pca data
+  write.csv(pcaData$rotated, file =paste0(PCA_output,"pcaData","DEP_bc",".csv"))
+  
+  # Set colors
+color_vector <-
+  c(
+    '0' = 'black',
+    '4' = 'purple',
+    '24' = 'darkgreen',
+    '48' = 'darkorange'
+  )
+
+  # plot 5 pricipal components in a pairsplot
+  pairsplot <- pairsplot(pcaData,
+      components = getComponents(pcaData, c(1:5)),
+      triangle = TRUE, trianglelabSize = 12,
+      hline = 0, vline = 0,
+      pointSize = 0.4,
+      gridlines.major = FALSE, gridlines.minor = FALSE,
+      colby = 'Timepoint',
+      colkey= color_vector,
+      title = 'Pairs plot', plotaxes = FALSE,
+      legendPosition = 'none',
+      margingaps = unit(c(-0.01, -0.01, -0.01, -0.01), 'cm'))
+  pairsplot
+  # save graph as PDF
+  ggsave(
+    filename = paste0(PCA_graph,"DEP_bc_","pairsplot", ".pdf"),
+    plot = pairsplot
+    )
+  
+  # PCA 1
+  p1 <- biplot(pcaData, x = "PC1", y = "PC2",
+         lab = NULL ,
+         colby = "Timepoint",
+         colkey= color_vector,
+         legendPosition = 'right' )
+  p1
+  # save graph as PDF
+  ggsave(
+    filename = paste0(PCA_graph,"pca_DEP_bc_","Timepoint",".pdf"),
+    plot = p1
+    )
+  
+}
+
+# Missing Values PCA
+for(h in seq_along(DEP_TMT_EDA_mv_ls)){
+  
+  # Directories
+  PCA_graph <- paste0(graph_dir,names(DEP_TMT_EDA_mv_ls)[h],"/")
+  PCA_output <- paste0(output_dir,names(DEP_TMT_EDA_mv_ls)[h],"/")
+  
+  # Extract single
+  DEP_mv <- DEP_TMT_EDA_mv_ls[[h]]
+  
+  # Create pca object
+  pcaData <- PCAtools::pca(assay(DEP_mv), metadata = colData(DEP_mv))
+  
+  # Save pca data
+  write.csv(pcaData$rotated, file =paste0(PCA_output,"pcaData","DEP_mv",".csv"))
+  
+  # Set colors
+color_vector <-
+  c(
+    '0' = 'black',
+    '4' = 'purple',
+    '24' = 'darkgreen',
+    '48' = 'darkorange'
+  )
+  
+  # plot 5 pricipal components in a pairsplot
+  pairsplot <- pairsplot(pcaData,
+      components = getComponents(pcaData, c(1:5)),
+      triangle = TRUE, trianglelabSize = 12,
+      hline = 0, vline = 0,
+      pointSize = 0.4,
+      gridlines.major = FALSE, gridlines.minor = FALSE,
+      colby = 'Timepoint',
+      colkey= color_vector,
+      title = 'Pairs plot', plotaxes = FALSE,
+      legendPosition = 'none',
+      margingaps = unit(c(-0.01, -0.01, -0.01, -0.01), 'cm'))
+  pairsplot
+  # save graph as PDF
+  ggsave(
+    filename = paste0(PCA_graph,"DEP_mv","pairsplot", ".pdf"),
+    plot = pairsplot
+    )
+  
+  # PCA 1
+  p1 <- biplot(pcaData, x = "PC1", y = "PC2",
+         lab = NULL ,
+         colby = "Timepoint",
+         colkey= color_vector,
+         legendPosition = 'right' )
+  p1
+  # save graph as PDF
+  ggsave(
+    filename = paste0(PCA_graph,"pca_DEP_mv_","Timepoint",".pdf"),
+    plot = p1
+    )
+  
+}
+
+```
+
+#### Euclidian distances
+Batch corrected values
+```{r}
+system.time(
+for(h in seq_along(DEP_TMT_EDA_bc_ls)){
+  
+  # Directories
+  Euclidian_graph <- paste0(graph_dir,names(DEP_TMT_EDA_bc_ls)[h],"/")
+  Euclidian_output <- paste0(output_dir,names(DEP_TMT_EDA_bc_ls)[h],"/")
+  
+  # Extract single
+  DEP_bc <- DEP_TMT_EDA_bc_ls[[h]]
+
+# calculate sample euclidian distances
+sampleDists <- dist(t(assay(DEP_bc)))
+
+# plot sample euclidian distances via a heatmap
+sampleDistMatrix <- as.matrix( sampleDists )
+
+# Complex Heatmap annotation labels
+annotation_col<-
+  HeatmapAnnotation(df = data.frame(Model = DEP_bc@colData$Cell.Line,
+                                    Time = DEP_bc@colData$Timepoint),
+  col = list(Model =
+  c(
+    'C' = 'black',
+    'CEv3' = 'red',
+    'E4' = 'deepskyblue4',
+    'E5' = 'turquoise3',
+    'G1' = 'purple4',
+    'G5' = 'mediumorchid',
+    'G8' = 'deeppink',
+    'G12' = 'pink2'
+  ),
+  Time =
+    c(
+    '0' = 'black',
+    '4' = 'purple',
+    '24' = 'darkgreen',
+    '48' = 'darkorange'
+      )
+  ))
+
+# Heatmap of euclidian distances
+ed_heatmap <-
+  ComplexHeatmap::Heatmap(
+      sampleDistMatrix,
+      name = " ",
+      column_title = "Euclidian Distances",
+      show_column_names = FALSE,
+      show_row_names = FALSE,
+      clustering_distance_rows = "euclidean",
+      clustering_distance_columns = "euclidean",
+      clustering_method_rows = "complete",
+      clustering_method_columns = "complete",
+      col = colorRampPalette( rev(brewer.pal(9, "Blues")) )(255),
+      top_annotation = annotation_col
+    )
+
+pdf(file=paste0(Euclidian_graph,"Euclidian_distance_bc",".pdf"))
+draw(ed_heatmap)
+dev.off()
+
+}
+)
+
+```
+
+Missing Values
+```{r}
+system.time(
+for(h in seq_along(DEP_TMT_EDA_mv_ls)){
+  
+  # Directories
+  Euclidian_graph <- paste0(graph_dir,names(DEP_TMT_EDA_mv_ls)[h],"/")
+  Euclidian_output <- paste0(output_dir,names(DEP_TMT_EDA_mv_ls)[h],"/")
+  
+  # Extract single
+  DEP_mv <- DEP_TMT_EDA_mv_ls[[h]]
+
+# calculate sample euclidian distances
+sampleDists <- dist(t(assay(DEP_mv)))
+
+# plot sample euclidian distances via a heatmap
+sampleDistMatrix <- as.matrix( sampleDists )
+
+# Complex Heatmap annotation labels
+annotation_col<-
+  HeatmapAnnotation(df = data.frame(Model = DEP_mv@colData$Cell.Line,
+                                    Time = DEP_mv@colData$Timepoint),
+  col = list(Model =
+  c(
+    'C' = 'black',
+    'CEv3' = 'red',
+    'E4' = 'deepskyblue4',
+    'E5' = 'turquoise3',
+    'G1' = 'purple4',
+    'G5' = 'mediumorchid',
+    'G8' = 'deeppink',
+    'G12' = 'pink2'
+  ),
+  Time =
+    c(
+    '0' = 'black',
+    '4' = 'purple',
+    '24' = 'darkgreen',
+    '48' = 'darkorange'
+      )
+  ))
+
+# Heatmap of euclidian distances
+ed_heatmap <-
+  ComplexHeatmap::Heatmap(
+      sampleDistMatrix,
+      name = " ",
+      column_title = "Euclidian Distances",
+      show_column_names = FALSE,
+      show_row_names = FALSE,
+      clustering_distance_rows = "euclidean",
+      clustering_distance_columns = "euclidean",
+      clustering_method_rows = "complete",
+      clustering_method_columns = "complete",
+      col = colorRampPalette( rev(brewer.pal(9, "Blues")) )(255),
+      top_annotation = annotation_col
+    )
+
+pdf(file=paste0(Euclidian_graph,"Euclidian_distance_mv",".pdf"))
+draw(ed_heatmap)
+dev.off()
+
+}
+)
+
+```
+
+#### Genes of Interest (GOI)
+This chunk will extract the normalized batch corrected counts for GOI
+##### normCounts
+```{r, fig.keep='first'}
+
+#  user  system elapsed 
+# 602.754   5.045 732.333 
+
+system.time(for (h in seq_along(DEP_TMT_EDA_bc_ls)){
+
+# Directories for normCounts
+dir.create(paste0(output_dir,names(DEP_TMT_EDA_bc_ls)[h],"/","normCounts"))
+output_dir_normCounts <- paste0(output_dir,names(DEP_TMT_EDA_bc_ls)[h],"/","normCounts/")
+dir.create(paste0(graph_dir,names(DEP_TMT_EDA_bc_ls)[h],"/","normCounts"))
+graph_dir_normCounts <- paste0(graph_dir,names(DEP_TMT_EDA_bc_ls)[h],"/","normCounts/")
+
+DEP_normCounts <- DEP_TMT_EDA_bc_ls[[h]]
+
+# DEP_normCounts
+norm_counts <- as.data.frame(assay(DEP_normCounts))
+normCounts <- norm_counts
+
+# Import DF of GOI
+# normCounts_goi_df <- read.csv("/Data/Input/RNAseq/REF/normCounts_goi_mouse.csv",header = TRUE, fileEncoding = "UTF-8-BOM")
+
+# vectors of genes of interest. Filtered for present
+goi <- row.names(DEP_normCounts)
+
+# Check all goi are present after filtering
+match(goi,row.names(normCounts))
+
+# Transform data
+counts_goi <- as.data.frame(t(normCounts[goi,]))
+counts.rn_counts_goi <- rownames(counts_goi)
+
+# Extract each gene in to a unique dataframe
+counts_data_list_goi <- list()
+for (i in seq_along(goi)) {
+  counts_data_list_goi[[goi[i]]] <- as.data.frame(counts_goi[, i])
+  rownames(counts_data_list_goi[[goi[i]]]) <- counts.rn_counts_goi
+  counts_data_list_goi[[goi[i]]] <-
+    rownames_to_column(counts_data_list_goi[[goi[i]]], var = "sample_id")
+  colnames(counts_data_list_goi[[goi[i]]])[2] <- "norm_counts"
+  counts_data_list_goi[[goi[i]]]$cell_line_abbr <-
+    DEP_normCounts@colData$Cell.Line[match(counts_data_list_goi[[goi[i]]]$sample_id,
+                                          rownames(DEP_normCounts@colData))]
+  counts_data_list_goi[[goi[i]]]$drug <-
+    DEP_normCounts@colData$drug[match(counts_data_list_goi[[goi[i]]]$sample_id,
+                                       rownames(DEP_normCounts@colData))]
+  counts_data_list_goi[[goi[i]]]$drug_conc_uM <-
+    DEP_normCounts@colData$drug_conc_uM[match(counts_data_list_goi[[goi[i]]]$sample_id,
+                                  rownames(DEP_normCounts@colData))]
+    counts_data_list_goi[[goi[i]]]$time_h <-
+    DEP_normCounts@colData$Timepoint[match(counts_data_list_goi[[goi[i]]]$sample_id,
+                                  rownames(DEP_normCounts@colData))]
+    counts_data_list_goi[[goi[i]]]$condition <-
+    DEP_normCounts@colData$condition[match(counts_data_list_goi[[goi[i]]]$sample_id,
+                                  rownames(DEP_normCounts@colData))]
+}
+
+# Save count data for GOI
+for (i in seq_along(counts_data_list_goi)) {
+  write.csv(
+  counts_data_list_goi[[i]],
+  file = paste0(output_dir_normCounts, names(counts_data_list_goi)[i], ".csv"),
+  row.names = TRUE
+  )
+}
+
+# Compute stats for GOI
+counts_data_list_goi_stats <- list()
+for (i in seq_along(counts_data_list_goi)) {
+  counts_data_list_goi_stats[[names(counts_data_list_goi)[i]]] <-
+    counts_data_list_goi[[i]] %>%
+    group_by(time_h) %>%
+    summarise(
+      n = n(),
+      avg_normCount = mean(norm_counts),
+      sd = sd(norm_counts),
+      IQR = IQR(norm_counts),
+      MAD = mad(norm_counts),
+      Coeff.Variation.Prcnt =sd(norm_counts) / mean(norm_counts) * 100
+      )
+}
+
+# Save stats data for GOI
+for (i in seq_along(counts_data_list_goi_stats)) {
+  write.csv(
+  counts_data_list_goi_stats[[i]],
+  file = paste0(output_dir_normCounts, names(counts_data_list_goi_stats)[i], "_stats.csv"),
+  row.names = TRUE
+  )
+}
+
+# Boxplots on linear scale
+b <- list()
+for (i in seq_along(counts_data_list_goi)) {
+  b[[i]] <- ggplot(data = counts_data_list_goi[[i]],
+  aes(x = factor(counts_data_list_goi[[i]]$condition, levels = mixedsort(unique(counts_data_list_goi[[i]]$condition))),
+  y = counts_data_list_goi[[i]]$norm_counts)) +
+  geom_boxplot() +
+  geom_point() +
+  xlab("Genotype") +
+  ylab("Normalized Counts") +
+  scale_y_continuous() +
+  labs(title = paste0(names(counts_data_list_goi[i]), " DEP_normCounts")) +
+  theme(axis.text.x = element_text(angle = 90, hjust = 0.5, vjust = 0.5, size=rel(1)))
+  print(b[[i]])
+  ggsave(filename = paste0(
+    graph_dir_normCounts,
+    names(counts_data_list_goi)[[i]],
+    "_normCounts",
+    ".pdf"
+  ))
+}
+
+# Boxplots on linear scale
+b <- list()
+for (i in seq_along(counts_data_list_goi)) {
+  b[[i]] <- ggplot(data = counts_data_list_goi[[i]],
+  aes(x = counts_data_list_goi[[i]]$condition ,
+  y = counts_data_list_goi[[i]]$norm_counts)) +
+  geom_boxplot() +
+  geom_point() +
+  xlab("Genotype") +
+  ylab("Normalized Counts") +
+  scale_y_continuous() +
+  labs(title = paste0(names(counts_data_list_goi[i]), " DEP_normCounts")) +
+  theme(axis.text.x = element_text(angle = 90, hjust = 0.5, vjust = 0.5, size=rel(1)))
+  print(b[[i]])
+  ggsave(filename = paste0(
+    graph_dir_normCounts,
+    names(counts_data_list_goi)[[i]],
+    "_normCounts",
+    ".pdf"
+  ))
+}
+
+# Graphics termination
+if(!is.null(dev.list())) dev.off()
+if(!is.null(dev.list())) graphics.off()
+
+})
+
+
+```
+
+This chunk will extract the Impute counts for GOI
+##### normCounts (MV)
+```{r, fig.keep='first'}
+
+#  user  system elapsed 
+# 602.754   5.045 732.333 
+
+system.time(for (h in seq_along(DEP_TMT_EDA_mv_ls)){
+
+# Directories for normCounts
+dir.create(paste0(output_dir,names(DEP_TMT_EDA_mv_ls)[h],"/","normCounts_MV"))
+output_dir_normCounts <- paste0(output_dir,names(DEP_TMT_EDA_mv_ls)[h],"/","normCounts_MV/")
+dir.create(paste0(graph_dir,names(DEP_TMT_EDA_mv_ls)[h],"/","normCounts_MV"))
+graph_dir_normCounts <- paste0(graph_dir,names(DEP_TMT_EDA_mv_ls)[h],"/","normCounts_MV/")
+
+DEP_normCounts <- DEP_TMT_EDA_mv_ls[[h]]
+
+# DEP_normCounts
+norm_counts <- as.data.frame(assay(DEP_normCounts))
+normCounts <- norm_counts
+
+# Import DF of GOI
+# normCounts_goi_df <- read.csv("/Data/Input/RNAseq/REF/normCounts_goi_mouse.csv",header = TRUE, fileEncoding = "UTF-8-BOM")
+
+# vectors of genes of interest. Filtered for present
+goi <- row.names(DEP_normCounts)
+
+# Check all goi are present after filtering
+match(goi,row.names(normCounts))
+
+# Transform data
+counts_goi <- as.data.frame(t(normCounts[goi,]))
+counts.rn_counts_goi <- rownames(counts_goi)
+
+# Extract each gene in to a unique dataframe
+counts_data_list_goi <- list()
+for (i in seq_along(goi)) {
+  counts_data_list_goi[[goi[i]]] <- as.data.frame(counts_goi[, i])
+  rownames(counts_data_list_goi[[goi[i]]]) <- counts.rn_counts_goi
+  counts_data_list_goi[[goi[i]]] <-
+    rownames_to_column(counts_data_list_goi[[goi[i]]], var = "sample_id")
+  colnames(counts_data_list_goi[[goi[i]]])[2] <- "norm_counts"
+  counts_data_list_goi[[goi[i]]]$cell_line_abbr <-
+    DEP_normCounts@colData$Cell.Line[match(counts_data_list_goi[[goi[i]]]$sample_id,
+                                          rownames(DEP_normCounts@colData))]
+  counts_data_list_goi[[goi[i]]]$drug <-
+    DEP_normCounts@colData$drug[match(counts_data_list_goi[[goi[i]]]$sample_id,
+                                       rownames(DEP_normCounts@colData))]
+  counts_data_list_goi[[goi[i]]]$drug_conc_uM <-
+    DEP_normCounts@colData$drug_conc_uM[match(counts_data_list_goi[[goi[i]]]$sample_id,
+                                  rownames(DEP_normCounts@colData))]
+    counts_data_list_goi[[goi[i]]]$time_h <-
+    DEP_normCounts@colData$Timepoint[match(counts_data_list_goi[[goi[i]]]$sample_id,
+                                  rownames(DEP_normCounts@colData))]
+    counts_data_list_goi[[goi[i]]]$condition <-
+    DEP_normCounts@colData$condition[match(counts_data_list_goi[[goi[i]]]$sample_id,
+                                  rownames(DEP_normCounts@colData))]
+}
+
+# Save count data for GOI
+for (i in seq_along(counts_data_list_goi)) {
+  write.csv(
+  counts_data_list_goi[[i]],
+  file = paste0(output_dir_normCounts, names(counts_data_list_goi)[i], ".csv"),
+  row.names = TRUE
+  )
+}
+
+# Compute stats for GOI
+counts_data_list_goi_stats <- list()
+for (i in seq_along(counts_data_list_goi)) {
+  counts_data_list_goi_stats[[names(counts_data_list_goi)[i]]] <-
+    counts_data_list_goi[[i]] %>%
+    group_by(time_h) %>%
+    summarise(
+      n = n(),
+      avg_normCount = mean(norm_counts),
+      sd = sd(norm_counts),
+      IQR = IQR(norm_counts),
+      MAD = mad(norm_counts),
+      Coeff.Variation.Prcnt =sd(norm_counts) / mean(norm_counts) * 100
+      )
+}
+
+# Save stats data for GOI
+for (i in seq_along(counts_data_list_goi_stats)) {
+  write.csv(
+  counts_data_list_goi_stats[[i]],
+  file = paste0(output_dir_normCounts, names(counts_data_list_goi_stats)[i], "_stats.csv"),
+  row.names = TRUE
+  )
+}
+
+# Boxplots on linear scale
+b <- list()
+for (i in seq_along(counts_data_list_goi)) {
+  b[[i]] <- ggplot(data = counts_data_list_goi[[i]],
+  aes(x = factor(counts_data_list_goi[[i]]$condition, levels = mixedsort(unique(counts_data_list_goi[[i]]$condition))),
+  y = counts_data_list_goi[[i]]$norm_counts)) +
+  geom_boxplot() +
+  geom_point() +
+  xlab("Genotype") +
+  ylab("Normalized Counts") +
+  scale_y_continuous() +
+  labs(title = paste0(names(counts_data_list_goi[i]), " DEP_normCounts")) +
+  theme(axis.text.x = element_text(angle = 90, hjust = 0.5, vjust = 0.5, size=rel(1)))
+  print(b[[i]])
+  ggsave(filename = paste0(
+    graph_dir_normCounts,
+    names(counts_data_list_goi)[[i]],
+    "_normCounts",
+    ".pdf"
+  ))
+}
+
+# Boxplots on linear scale
+b <- list()
+for (i in seq_along(counts_data_list_goi)) {
+  b[[i]] <- ggplot(data = counts_data_list_goi[[i]],
+  aes(x = counts_data_list_goi[[i]]$condition ,
+  y = counts_data_list_goi[[i]]$norm_counts)) +
+  geom_boxplot() +
+  geom_point() +
+  xlab("Genotype") +
+  ylab("Normalized Counts") +
+  scale_y_continuous() +
+  labs(title = paste0(names(counts_data_list_goi[i]), " DEP_normCounts")) +
+  theme(axis.text.x = element_text(angle = 90, hjust = 0.5, vjust = 0.5, size=rel(1)))
+  print(b[[i]])
+  ggsave(filename = paste0(
+    graph_dir_normCounts,
+    names(counts_data_list_goi)[[i]],
+    "_normCounts",
+    ".pdf"
+  ))
+}
+
+# Graphics termination
+if(!is.null(dev.list())) dev.off()
+if(!is.null(dev.list())) graphics.off()
+
+})
+
+
+```
+
+#### Limma
+##### Comparisons
+```{r}
+comps_ls <- list()
+for (h in seq_along(DEP_TMT_EDA_mv_ls)){
+
+# Directories 
+dir.create(paste0(output_dir,names(DEP_TMT_EDA_mv_ls)[[h]],"/","Limma_res"))
+output_dir_res <- paste0(output_dir,names(DEP_TMT_EDA_mv_ls)[[h]],"/","Limma_res/")
+dir.create(paste0(graph_dir,names(DEP_TMT_EDA_mv_ls)[[h]],"/","Limma_res"))
+graph_dir_res <- paste0(graph_dir,names(DEP_TMT_EDA_mv_ls)[[h]],"/","Limma_res/")
+
+# Extract one
+DEP_mv <- DEP_TMT_EDA_mv_ls[[h]]
+
+# comps
+comps_factor <- as.vector(factor(paste0(colData(DEP_mv)$condition)))
+comps_df <- crossing(comp_num=comps_factor, comp_denom=comps_factor)
+comps_df <- subset(comps_df, as.character(comps_df$comp_num) != as.character(comps_df$comp_denom))
+
+# All comps
+comps_df_all <- comps_df
+comps_df_all <- cbind(comp_type="condition",comps_df_all)
+comps_df_all <- cbind(comp_no=1:nrow(comps_df_all),comps_df_all)
+comps_df_all$comp_name <- paste(comps_df_all$comp_num, "vs", comps_df_all$comp_denom, sep = "-")
+comps_df_all$comp <- paste(comps_df_all$comp_num,comps_df_all$comp_denom, sep="-")
+write.csv(comps_df_all, file=paste0(output_dir_res,"comps_all.csv"), col.names = T, row.names = F)
+comps_all_subset <- comps_df_all[,2:4]
+
+# Unique comps only (for only unique combo)
+comps_df_unique <- comps_df[!duplicated(t(apply(comps_df, 1, sort))), ]
+comps_df_unique <- cbind(comp_type="condition",comps_df_unique )
+comps_df_unique <- cbind(comp_no=1:nrow(comps_df_unique),comps_df_unique)
+comps_df_unique$comp_name <- paste(comps_df_unique$comp_num, "vs", comps_df_unique$comp_denom, sep = "-")
+comps_df_unique$comp <- paste(comps_df_unique$comp_num,comps_df_unique$comp_denom, sep="-")
+write.csv(comps_df_unique, file=paste0(output_dir_res,"comps_unique.csv"), col.names = T, row.names = F)
+comps_unique_subset <- comps_df_unique[,2:4]
+
+# Comp list to use (all comps)
+comps <- comps_df_all
+
+# List of comps
+comps_ls[[names(DEP_TMT_EDA_mv_ls)[h]]] <- comps
+}
+```
+
+##### DE results
+```{r}
+# Extract
+# Results
+# mibs_comp_list
+DEP_TMT_EDA_limmaRes <- list()
+for (h in seq_along(comps_ls)){
+  
+comps <- comps_ls[[h]]
+
+# Directories 
+dir.create(paste0(output_dir,names(DEP_TMT_EDA_mv_ls)[[h]],"/","Limma_res"))
+output_dir_res <- paste0(output_dir,names(DEP_TMT_EDA_mv_ls)[[h]],"/","Limma_res/")
+dir.create(paste0(graph_dir,names(DEP_TMT_EDA_mv_ls)[[h]],"/","Limma_res"))
+graph_dir_res <- paste0(graph_dir,names(DEP_TMT_EDA_mv_ls)[[h]],"/","Limma_res/")
+
+# Extract results
+DEP_TMT_limmaRes <- list()
+for (i in seq_along(comps$comp)){
+  DEP_TMT_limmaRes[[comps$comp[i]]] <-
+    mibs_comp_list[[paste0(comps$comp[i])]]
+}
+
+# save results
+for (i in seq_along(DEP_TMT_limmaRes)) {
+  write.csv(
+  DEP_TMT_limmaRes[[i]],
+  file = paste0(output_dir_res,"comp_", i, "_", names(DEP_TMT_limmaRes)[i], ".csv"),
+  row.names = TRUE
+  )
+}
+DEP_TMT_EDA_limmaRes[[names(comps_ls)[h]]] <- DEP_TMT_limmaRes
+}
+
+```
+
+###### Summarize Results
+```{r}
+
+for(h in seq_along(DEP_TMT_EDA_limmaRes)){
+
+comps_df_all <- comps_ls[[names(DEP_TMT_EDA_limmaRes)[h]]]
+DEP_TMT_limmaRes <- DEP_TMT_EDA_limmaRes[[h]]
+
+# Directories 
+dir.create(paste0(output_dir,names(DEP_TMT_EDA_limmaRes)[[h]],"/","Limma_res"))
+output_dir_res <- paste0(output_dir,names(DEP_TMT_EDA_limmaRes)[[h]],"/","Limma_res/")
+dir.create(paste0(graph_dir,names(DEP_TMT_EDA_limmaRes)[[h]],"/","Limma_res"))
+graph_dir_res <- paste0(graph_dir,names(DEP_TMT_EDA_limmaRes)[[h]],"/","Limma_res/")
+
+# Extract comps of interest
+coi <- comps_df_all[grep("0",comps_df_all$comp_denom),]
+comp_list_oi <- DEP_TMT_limmaRes[names(DEP_TMT_limmaRes) %in% coi$comp]
+comp_list_oi <- lapply(comp_list_oi,data.frame)
+
+# Label list of DF
+for (i in seq_along(comp_list_oi)){
+  colnames(comp_list_oi[[i]]) <- paste0(colnames(comp_list_oi[[i]]),"_",names(comp_list_oi)[[i]])
+  comp_list_oi[[i]]$Gene_ID <- row.names(comp_list_oi[[i]])
+}
+
+# Left_join comps of interest to 1x spreadsheet
+comp_list_oi_master <- Reduce(function(x, y) left_join(x, y, by="Gene_ID"), comp_list_oi)
+row.names(comp_list_oi_master) <- comp_list_oi_master$Gene_ID
+comp_list_oi_master <- comp_list_oi_master[,-which(colnames(comp_list_oi_master)=="Gene_ID")]
+comp_list_oi_master <- comp_list_oi_master[,-which(colnames(comp_list_oi_master)%in% paste0(grep("gene_",colnames(comp_list_oi_master), value = T)))]
+
+
+# Subset to spreadsheets
+comp_list_oi_padj <- comp_list_oi_master[,grep("adj.P.Val_", colnames(comp_list_oi_master))]
+comp_list_oi_pvalue <- comp_list_oi_master[,grep("P.Value_", colnames(comp_list_oi_master))]
+comp_list_oi_l2fc <- comp_list_oi_master[,grep("logFC_", colnames(comp_list_oi_master))]
+
+# Save spreadsheets
+write.csv(comp_list_oi_padj, file = paste0(output_dir_res,"All_coi_","padj",".csv"))
+write.csv(comp_list_oi_pvalue, file = paste0(output_dir_res,"All_coi_","pvalue",".csv"))
+write.csv(comp_list_oi_l2fc, file = paste0(output_dir_res,"All_coi_","l2fc",".csv"))
+}
+```
+
+###### Volcano Plots
+```{r, fig.keep='first'}
+
+for(h in seq_along(DEP_TMT_EDA_limmaRes)){
+  
+# Extract one
+subset_limmaRes <- DEP_TMT_EDA_limmaRes[[h]]
+  
+# Directory for volcano plots
+dir.create(paste0(graph_dir,names(DEP_TMT_EDA_limmaRes)[h],"/","volcano"))
+graph_dir_vol <- paste0(graph_dir,names(DEP_TMT_EDA_limmaRes)[h],"/","volcano/")
+
+# Plot Volcano
+volcano_plots_ls <- list()
+for (i in seq_along(subset_limmaRes)){
+  plot(volcano_plots_ls[[names(subset_limmaRes)[i]]] <- 
+    EnhancedVolcano(
+      subset_limmaRes[[i]], 
+      lab=row.names(subset_limmaRes[[i]]),
+      x="logFC",
+      y="adj.P.Val",
+      title= paste0("MIBs ",names(subset_limmaRes)[[i]]),
+      pCutoff =qval, 
+      FCcutoff =lfc,
+      pointSize = 2.0, 
+      labSize = 3.0 
+    ))}
+
+# Save Volcano
+for (i in seq_along(volcano_plots_ls)){
+ggsave(filename = paste0(graph_dir_vol,"comp_", i, "_", names(volcano_plots_ls)[[i]],".pdf"), plot=volcano_plots_ls[[i]])
+}
+
+# Graphics termination 
+if(!is.null(dev.list())) dev.off()
+if(!is.null(dev.list())) graphics.off()
+
+}
+
+```
+
+# Session Info
+```{r}
+sessionInfo()
+```
+
+# Timing End
+```{r}
+proc.time() - ptm
+```
+

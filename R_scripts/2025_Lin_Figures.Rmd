@@ -1,0 +1,4837 @@
+---
+title: "2025 Lin et al. Figures"
+author: "Benjamin Lin"
+editor: "C Ryan Miller"
+date: '`r format(Sys.time(), "Last modified: %d %b %Y")`'
+output:
+  html_document:
+    toc: yes
+    toc_float: yes
+    toc_depth: 6 
+    code_folding: hide
+layout: page
+subtitle: "C Ryan Miller Lab @ UAB"
+affiliation: UAB
+editor_options: 
+  chunk_output_type: inline
+---
+
+This R Markdown (RMD) file generates figures for the 2025 Lin manuscript.  <br/>
+[https://github.com/benlin-UAB/2025_Lin_ComboSyntheticLethality_Manuscript](https://github.com/benlin-UAB/2025_Lin_ComboSyntheticLethality_Manuscript)
+
+# Setup
+This code section starts script timing, loads R libraries, sets file directory path and seed for analysis, and imports bm_hEGFR. bm_hEGFR is a dataframe that contains matched ensembl gene_id and mouse and human gene names. This object translates between mouse and human genes.
+  
+Script Timing Start
+```{r timing setup}
+ptm <- proc.time()
+```
+
+Docker mount directory
+```{r directories}
+Data <- paste0("/Data/")
+```
+
+Load Libraries
+```{r libraries, message = FALSE}
+library(tibble)
+library(rtracklayer)
+library(biomaRt)
+library(dplyr)
+library(Biobase)
+library(tximport)
+library(DESeq2)
+library(ggplot2)
+library(scales)
+library(grid)
+library(gridExtra)
+library(cowplot)
+library(colorRamps)
+library(RColorBrewer)
+library(pheatmap)
+library(tidyverse)
+library(ReportingTools)
+library(BiocParallel)
+library(factoextra)
+library(EnhancedVolcano)
+library(gplots)
+library(grDevices)
+library(rmarkdown)
+library(RSQLite)
+library(GSVA)
+library(msigdbr)
+library(fgsea)
+library(UpSetR)
+library(ComplexHeatmap)
+library(circlize)
+library(vsn)
+library(gprofiler2)
+library(ggpubr)
+library(PCAtools)
+library(readxl)
+```
+
+Set.Seed
+```{r seed}
+# This will set the random number generator
+set.seed(888)
+```
+
+bm_hEGFR: Human to mouse genes translation matrix
+```{r gene translation}
+bm_hEGFR <- readRDS(paste0(Data,"Input/Figures/bm_hEGFR.rds"))
+```
+
+Docker mount directory
+```{r}
+Data <- paste0("/Data/")
+```
+
+# Directories
+```{r}
+dir.create(paste0(Data,"Figures/")) # Only need to make this directory once
+```
+
+
+Save Environment: Setup environment that is imported for each figure
+```{r environment}
+system.time(save.image(file=paste0("/Data/Input/Figures/setup_workspace.RData")))
+```
+
+# Receptor Kinases Heatmap
+Setup
+```{r}
+# Clean environment
+rm(list = ls())
+gc()
+
+# Import setup workspace
+load(paste0("/Data/Input/Figures/setup_workspace.RData"))
+```
+
+Directories
+```{r}
+fig.label <- paste0("Receptor_Kinases_Heatmap")
+input_dir <- paste0(Data,"Input/Figures/",fig.label,"/")
+figures_dir <- paste0(Data,"Figures/",fig.label,"/")
+dir.create(figures_dir)
+
+```
+
+## Protein_Full
+Import data
+```{r}
+# Import batch corrected values
+DEP_Bl_Par_fs <- readRDS(tail(grep("DEP_Bl_Par_fs.rds",list.files(paste0(Data,"Output/MIB-BL/DEP_Bl_Par_fs"), recursive = F, full.names = T), value = T),1))
+
+# copy over transformed values
+vsd <- DEP_Bl_Par_fs
+
+```
+
+Import genesets
+```{r}
+# Import GOI for heatmap
+Heatmap_GOI_df <- read.csv(paste0(input_dir,"Heatmap_GOI.csv"))
+
+# Convert heatmap GOI to mouse
+convert_human2mouse <-merge(bm_hEGFR,Heatmap_GOI_df, by.x="hsapiens_homolog_associated_gene_name", by.y="HGNC_Receptor_Kinases")
+
+# Extract mouse genes
+Heatmap_GOI_df <- data.frame(convert_human2mouse[,"external_gene_name"])
+
+# Rename columns
+colnames(Heatmap_GOI_df) <- c("gene_symbol")
+
+# Subset vsd to genes in GOI
+vsd_Heatmap_GOI <- vsd[row.names(vsd) %in% Heatmap_GOI_df$gene_symbol,]
+```
+
+### Heatmap 
+#### Fig.1E
+```{r}
+# Extract matrix values
+mat <- as.matrix(assay(vsd_Heatmap_GOI))
+
+# Heatmap annotation labels
+annotation_col<-
+  HeatmapAnnotation(df = data.frame(Model = vsd_Heatmap_GOI@colData$cell_line_abbr,
+                                    Serum = vsd_Heatmap_GOI@colData$serum),
+  col = list(Model =
+  c(
+    'C' = 'black',
+    'CEv3' = 'red'
+  ),
+  Serum =
+    c("full"='firebrick',
+      "starve"='royalblue'
+      )
+  ))
+
+# Generate Heatmap
+Heatmap  <- ComplexHeatmap::Heatmap(
+  t(scale(t(mat))),
+  top_annotation = annotation_col,
+  name = " ",
+  column_title = paste0("Protein Kinases Receptors"),
+  show_column_names = F,
+  show_row_names = T,
+  row_names_gp = gpar(fontsize = 8),
+  width = ncol(mat)*unit(5, "mm"), 
+  height = nrow(mat)*unit(4, "mm")
+  )
+
+draw(Heatmap)
+
+# Save Heatmap
+# Get height and width of heatmap for pdf
+width = convertX(ComplexHeatmap:::width(draw(Heatmap)), "inch", valueOnly = TRUE)
+height = convertY(ComplexHeatmap:::height(draw(Heatmap)), "inch", valueOnly = TRUE)
+
+pdf(file=paste0(figures_dir, "FS Protein Kinases Receptors", ".pdf"), width = width+(0.01*width), height = height+(0.01*height))
+draw(Heatmap)
+dev.off()
+
+```
+
+## Protein_Starve
+Import data
+```{r}
+# Import batch corrected values
+DEP_Bl_Par_ss <- readRDS(tail(grep("DEP_Bl_Par_ss.rds",list.files(paste0(Data,"Output/MIB-BL/DEP_Bl_Par_ss"), recursive = F, full.names = T), value = T),1))
+
+# copy over transformed values
+vsd <- DEP_Bl_Par_ss
+
+
+```
+
+Import genesets
+```{r}
+# Import GOI for heatmap
+Heatmap_GOI_df <- read.csv(paste0(input_dir,"Heatmap_GOI.csv"))
+
+# Convert heatmap GOI to mouse
+convert_human2mouse <-merge(bm_hEGFR,Heatmap_GOI_df, by.x="hsapiens_homolog_associated_gene_name", by.y="HGNC_Receptor_Kinases")
+
+# Extract mouse genes
+Heatmap_GOI_df <- data.frame(convert_human2mouse[,"external_gene_name"])
+
+# Rename columns
+colnames(Heatmap_GOI_df) <- c("gene_symbol")
+
+# Subset vsd to genes in GOI
+vsd_Heatmap_GOI <- vsd[row.names(vsd) %in% Heatmap_GOI_df$gene_symbol,]
+```
+
+### Heatmap 
+#### Fig.1F
+```{r}
+# Extract matrix values
+mat <- as.matrix(assay(vsd_Heatmap_GOI))
+
+# Heatmap annotation labels
+annotation_col<-
+  HeatmapAnnotation(df = data.frame(Model = vsd_Heatmap_GOI@colData$cell_line_abbr,
+                                    Serum = vsd_Heatmap_GOI@colData$serum),
+  col = list(Model =
+  c(
+    'C' = 'black',
+    'CEv3' = 'red'
+  ),
+  Serum =
+    c("full"='firebrick',
+      "starve"='royalblue'
+      )
+  ))
+
+# Generate Heatmap
+Heatmap  <- ComplexHeatmap::Heatmap(
+  t(scale(t(mat))),
+  top_annotation = annotation_col,
+  name = " ",
+  column_title = paste0("Protein Kinases Receptors"),
+  show_column_names = F,
+  show_row_names = T,
+  row_names_gp = gpar(fontsize = 8),
+  width = ncol(mat)*unit(5, "mm"), 
+  height = nrow(mat)*unit(4, "mm")
+  )
+
+draw(Heatmap)
+
+# Save Heatmap
+# Get height and width of heatmap for pdf
+width = convertX(ComplexHeatmap:::width(draw(Heatmap)), "inch", valueOnly = TRUE)
+height = convertY(ComplexHeatmap:::height(draw(Heatmap)), "inch", valueOnly = TRUE)
+
+pdf(file=paste0(figures_dir, "SS Protein Kinases Receptors", ".pdf"), width = width+(0.01*width), height = height+(0.01*height))
+draw(Heatmap)
+dev.off()
+
+```
+
+## mRNA_Full
+Import data
+```{r}
+# Import batch corrected values
+dds_bl_Par_fs <- readRDS(tail(grep("bl_Par_fs.rds",list.files(paste0(Data,"Output/RNA/dds_EDA_subset/bl_Par_fs"), recursive = F, full.names = T), value = T),1))
+
+# vst transformation
+vsd<-vst(dds_bl_Par_fs, blind=T, nsub=1000, fitType = "parametric")
+
+```
+
+Import genesets
+```{r}
+# Import GOI for heatmap
+Heatmap_GOI_df <- read.csv(paste0(input_dir,"Heatmap_GOI.csv"))
+
+# Convert heatmap GOI to mouse
+convert_human2mouse <-merge(bm_hEGFR,Heatmap_GOI_df, by.x="hsapiens_homolog_associated_gene_name", by.y="HGNC_Receptor_Kinases")
+
+# Extract mouse genes
+Heatmap_GOI_df <- data.frame(convert_human2mouse[,"external_gene_name"])
+
+# Rename columns
+colnames(Heatmap_GOI_df) <- c("gene_symbol")
+
+# Subset vsd to genes in GOI
+vsd_Heatmap_GOI <- vsd[row.names(vsd) %in% Heatmap_GOI_df$gene_symbol,]
+```
+
+### Heatmap 
+#### S2A
+```{r}
+# Extract matrix values
+mat <- as.matrix(assay(vsd_Heatmap_GOI))
+
+# Heatmap annotation labels
+annotation_col<-
+  HeatmapAnnotation(df = data.frame(Model = vsd_Heatmap_GOI@colData$cell_line_abbr,
+                                    Serum = vsd_Heatmap_GOI@colData$serum),
+  col = list(Model =
+  c(
+    'C' = 'black',
+    'CEv3' = 'red'
+  ),
+  Serum =
+    c("full"='firebrick',
+      "starve"='royalblue'
+      )
+  ))
+
+# Generate Heatmap
+Heatmap  <- ComplexHeatmap::Heatmap(
+  t(scale(t(mat))),
+  top_annotation = annotation_col,
+  name = " ",
+  column_title = paste0("mRNA Kinases Receptors"),
+  show_column_names = F,
+  show_row_names = T,
+  row_names_gp = gpar(fontsize = 8),
+  width = ncol(mat)*unit(1.5, "mm"), 
+  height = nrow(mat)*unit(2.5, "mm")
+  )
+
+draw(Heatmap)
+
+# Save Heatmap
+# Get height and width of heatmap for pdf
+width = convertX(ComplexHeatmap:::width(draw(Heatmap)), "inch", valueOnly = TRUE)
+height = convertY(ComplexHeatmap:::height(draw(Heatmap)), "inch", valueOnly = TRUE)
+
+# width = ncol(mat_list) * 5 + (0.1 * ncol(mat_list) * 5)
+# height = nrow(mat_list) * 10 + (0.1 * nrow(mat_list) * 5)
+
+pdf(file=paste0(figures_dir, "FS mRNA Kinases Receptors", ".pdf"), width = width+(0.01*width), height = height+(0.01*height))
+draw(Heatmap)
+dev.off()
+
+# Graphics termination
+if(!is.null(dev.list())) dev.off()
+if(!is.null(dev.list())) graphics.off()
+```
+
+## mRNA_Starve
+Import data
+```{r}
+# Import batch corrected values
+dds_bl_Par_ss <- readRDS(tail(grep("bl_Par_ss.rds",list.files(paste0(Data,"Output/RNA/dds_EDA_subset/bl_Par_ss"), recursive = F, full.names = T), value = T),1))
+
+# vst transformation
+vsd<-vst(dds_bl_Par_ss, blind=T, nsub=1000, fitType = "parametric")
+
+```
+
+Import genesets
+```{r}
+# Import GOI for heatmap
+Heatmap_GOI_df <- read.csv(paste0(input_dir,"Heatmap_GOI.csv"))
+
+# Convert heatmap GOI to mouse
+convert_human2mouse <-merge(bm_hEGFR,Heatmap_GOI_df, by.x="hsapiens_homolog_associated_gene_name", by.y="HGNC_Receptor_Kinases")
+
+# Extract mouse genes
+Heatmap_GOI_df <- data.frame(convert_human2mouse[,"external_gene_name"])
+
+# Rename columns
+colnames(Heatmap_GOI_df) <- c("gene_symbol")
+
+# Subset vsd to genes in GOI
+vsd_Heatmap_GOI <- vsd[row.names(vsd) %in% Heatmap_GOI_df$gene_symbol,]
+```
+
+### Heatmap 
+#### S2B
+```{r}
+# Extract matrix values
+mat <- as.matrix(assay(vsd_Heatmap_GOI))
+
+# Heatmap annotation labels
+annotation_col<-
+  HeatmapAnnotation(df = data.frame(Model = vsd_Heatmap_GOI@colData$cell_line_abbr,
+                                    Serum = vsd_Heatmap_GOI@colData$serum),
+  col = list(Model =
+  c(
+    'C' = 'black',
+    'CEv3' = 'red'
+  ),
+  Serum =
+    c("full"='firebrick',
+      "starve"='royalblue'
+      )
+  ))
+
+# Define color scale from blue to white to red (for -4 to 4)
+color_scale <- colorRamp2(c(-4, 0, 4), c("blue", "white", "red"))
+
+Heatmap  <- ComplexHeatmap::Heatmap(
+  t(scale(t(mat))),
+  top_annotation = annotation_col,
+  name = " ",
+  column_title = paste0("mRNA Kinases Receptors"),
+  show_column_names = F,
+  show_row_names = T,
+  row_names_gp = gpar(fontsize = 8),
+  width = ncol(mat)*unit(5, "mm"), 
+  height = nrow(mat)*unit(2.5, "mm"),
+  col = color_scale,
+  heatmap_legend_param = list(
+    title = "Value",         # Title of the scale bar
+    legend_height = unit(4, "cm"),  # Height of the legend
+    legend_width = unit(1, "cm"),   # Width of the legend
+    labels_gp = gpar(fontsize = 10) # Font size for the legend labels
+  ))
+
+# Generate Heatmap
+Heatmap  <- ComplexHeatmap::Heatmap(
+  t(scale(t(mat))),
+  top_annotation = annotation_col,
+  name = " ",
+  column_title = paste0("mRNA Kinases Receptors"),
+  show_column_names = F,
+  show_row_names = T,
+  row_names_gp = gpar(fontsize = 8),
+  width = ncol(mat)*unit(5, "mm"), 
+  height = nrow(mat)*unit(2.5, "mm"))
+
+draw(Heatmap)
+
+
+# Save Heatmap
+# Get height and width of heatmap for pdf
+width = convertX(ComplexHeatmap:::width(draw(Heatmap)), "inch", valueOnly = TRUE)
+height = convertY(ComplexHeatmap:::height(draw(Heatmap)), "inch", valueOnly = TRUE)
+
+# width = ncol(mat_list) * 5 + (0.1 * ncol(mat_list) * 5)
+# height = nrow(mat_list) * 10 + (0.1 * nrow(mat_list) * 5)
+
+pdf(file=paste0(figures_dir, "SS mRNA Kinases Receptors", ".pdf"), width = width+(0.01*width), height = height+(0.01*height))
+draw(Heatmap)
+dev.off()
+
+# Graphics termination
+if(!is.null(dev.list())) dev.off()
+if(!is.null(dev.list())) graphics.off()
+```
+# Parental volcano plots
+Setup
+```{r}
+# Clean environment
+rm(list = ls())
+gc()
+
+# Import setup workspace
+load(paste0("/Data/Input/Figures/setup_workspace.RData"))
+```
+
+Directories
+```{r}
+fig.label <- paste0("parental_volcano_plots")
+figures_dir <- paste0(Data,"Figures/",fig.label,"/")
+dir.create(figures_dir)
+
+```
+
+## CEv3_Protein 
+### Fig.1G
+```{r}
+# limma results direct
+output_dir_res <- paste0(Data,"Output/MIB-BL/DEP_Bl_Par/","Limma_res/")
+
+# Import comps of interest
+coi <- read.csv(paste0(output_dir_res, "comp_9_CEv3.full-CEv3.starve.csv") , row.names = 1)
+
+# Title 
+VolTitle <- "DE protein in CEv3 cells: FS vs SS"
+
+# Plot Volcano
+volcano_plot <-
+    EnhancedVolcano(
+      coi, 
+      lab=row.names(coi),
+      x="logFC",
+      y="adj.P.Val",
+      title= paste0(VolTitle),
+      pCutoff =0.05, 
+      #FCcutoff =lfc,
+      pointSize = 2.0, 
+      labSize = 5.0
+    )
+
+volcano_plot
+
+# Save Volcano
+ggsave(filename = paste0(figures_dir,VolTitle,".pdf"), plot=volcano_plot)
+
+```
+
+## C_Protein 
+### Fig.1H
+```{r}
+# limma results direct
+output_dir_res <- paste0(Data,"Output/MIB-BL/DEP_Bl_Par/","Limma_res/")
+
+# Import comps of interest
+coi <- read.csv(paste0(output_dir_res, "comp_1_C.full-C.starve.csv") , row.names = 1)
+
+# Title 
+VolTitle <- "DE protein in C cells: FS vs SS"
+
+# Plot Volcano
+volcano_plot <-
+    EnhancedVolcano(
+      coi, 
+      lab=row.names(coi),
+      x="logFC",
+      y="adj.P.Val",
+      title= paste0(VolTitle),
+      pCutoff =0.05, 
+      #FCcutoff =lfc,
+      pointSize = 2.0, 
+      labSize = 5.0
+    )
+
+volcano_plot
+
+# Save Volcano
+ggsave(filename = paste0(figures_dir,VolTitle,".pdf"), plot=volcano_plot)
+
+```
+
+## CEv3_RNA 
+### S.2C
+```{r}
+# limma results direct
+output_dir_res <- paste0(Data,"Output/RNA/dds_EDA_subset/bl_Par/","DE2_res/")
+
+# Import comps of interest
+coi <- read.csv(paste0(output_dir_res, "comp_6_full_CEv3_NA_0-vs-starve_CEv3_NA_0.csv") , row.names = 1)
+
+# Title 
+VolTitle <- "DE mRNA in CEv3 cells: FS vs SS"
+
+# Plot Volcano
+volcano_plot <-
+    EnhancedVolcano(
+      coi, 
+      lab=row.names(coi),
+      x="log2FoldChange",
+      y="padj",
+      title= paste0(VolTitle),
+      pCutoff =0.05, 
+      FCcutoff =1,
+      pointSize = 2.0, 
+      labSize = 5.0
+    )
+
+volcano_plot
+
+# Save Volcano
+ggsave(filename = paste0(figures_dir,VolTitle,".pdf"), plot=volcano_plot)
+
+```
+## C_RNA 
+### S.2D
+```{r}
+# limma results direct
+output_dir_res <- paste0(Data,"Output/RNA/dds_EDA_subset/bl_Par/","DE2_res/")
+
+# Import comps of interest
+coi <- read.csv(paste0(output_dir_res, "comp_2_full_C_NA_0-vs-starve_C_NA_0.csv") , row.names = 1)
+
+# Title 
+VolTitle <- "DE mRNA in C cells: FS vs SS"
+
+# Plot Volcano
+volcano_plot <-
+    EnhancedVolcano(
+      coi, 
+      lab=row.names(coi),
+      x="log2FoldChange",
+      y="padj",
+      title= paste0(VolTitle),
+      pCutoff =0.05, 
+      FCcutoff =1,
+      pointSize = 2.0, 
+      labSize = 5.0
+    )
+
+volcano_plot
+
+# Save Volcano
+ggsave(filename = paste0(figures_dir,VolTitle,".pdf"), plot=volcano_plot)
+
+```
+# EGFR_TKI_Resistance_sig
+EGFR TKI resistance signature (in vitro models)
+
+Isogeneic in vitro models of resistance display heterogeneous activation of alternative signaling pathways. Raw counts were imported as an SE object and transformed using the vst() function from DESeq2. The WikiPathway geneset containing genes associated with EGFR TKI resistance was obtained from MSIGDB. The top 25 most variably expressed genes in this set are displayed as a scaled heatmap.
+
+Setup
+```{r}
+# Clean environment
+rm(list = ls())
+gc()
+
+# Import setup workspace
+load(paste0("/Data/Input/Figures/setup_workspace.RData"))
+```
+
+Directories
+```{r}
+fig.label <- paste0("EGFR_TKI_Resistance_sig")
+input_dir <- paste0(Data,"Input/Figures/",fig.label,"/")
+output_dir <- paste0(Data,"Figures/",fig.label,"/")
+dir.create(output_dir)
+```
+
+## mRNA_Full
+
+Import SE and vst transformation
+```{r}
+# Import SE object of samples
+dds_Bl_Res_fs <- readRDS(tail(grep("bl_Res_fs.rds",list.files(paste0(Data,"Output/RNA/dds_EDA_subset/bl_Res_fs"), recursive = T, full.names = T), value = T),1))
+
+# vst transformation
+vsd<-vst(dds_Bl_Res_fs, blind=T, nsub=1000, fitType = "parametric")
+```
+
+Import genesets
+```{r}
+# Import GOI for heatmap
+Heatmap_GOI_df <- read.csv(paste0(input_dir,"Heatmap_GOI.csv"))
+
+# Convert heatmap GOI to mouse
+convert_human2mouse <-merge(bm_hEGFR,Heatmap_GOI_df, by.x="hsapiens_homolog_associated_gene_name", by.y="WP_EGFR_TYROSINE_KINASE_INHIBITOR_RESISTANCE")
+
+# Extract mouse genes
+Heatmap_GOI_df <- data.frame(convert_human2mouse[,"external_gene_name"])
+
+# Rename columns
+colnames(Heatmap_GOI_df) <- c("gene_symbol")
+```
+
+Make Heatmap 
+### Fig.2E
+```{r}
+# Subset vsd to genes in GOI
+vsd_Heatmap_GOI <- vsd[row.names(vsd) %in% Heatmap_GOI_df$gene_symbol,]
+
+# Filter for top 25 variable genes
+#vsd_Heatmap_GOI <-  vsd_Heatmap_GOI[head(order(rowVars(as.matrix(assay(vsd_Heatmap_GOI))),decreasing=T), 25), ]
+
+# Extract matrix values from vsd_Heatmap_GOI
+mat <- as.matrix(assay(vsd_Heatmap_GOI))
+
+# Heatmap annotations 
+annotation_col <- HeatmapAnnotation(df = data.frame("Model" = factor(vsd_Heatmap_GOI@colData$cell_line_abbr,
+                                                    # Set legend order
+                                                    levels= c("CEv3","E4","E5","G1","G5","G8","G12")),
+                                                    "Sen" = vsd_Heatmap_GOI@colData$EGFR_TKI_sen),
+    which="column",
+    col = list("Model" =  
+  c(
+    'CEv3' = 'red',
+    'E4' = 'deepskyblue4',
+    'E5' = 'turquoise3',
+    'G1' = 'purple4',
+    'G5' = 'mediumorchid',
+    'G8' = 'deeppink',
+    'G12' = 'pink2'
+  ),
+  Sen =
+    c('Resistant'='brown',
+      'Sensitive'='blue')
+  ))
+
+# Generate Heatmap
+heatmap <- ComplexHeatmap::Heatmap(
+  t(scale(t(mat))),
+  top_annotation = annotation_col,
+  name = " ",
+  column_title = "FS_WP_EGFR_TYROSINE_KINASE_INHIBITOR_RESISTANCE",
+  show_column_names = F,
+  show_row_names = F
+  )
+
+# Save Heatmap
+pdf(file=paste0(output_dir,"FS_WP_EGFR_TKI_Res.pdf"))
+draw(heatmap)
+dev.off()
+
+# Draw Heatmap
+draw(heatmap)
+
+# Graphics termination
+if(!is.null(dev.list())) dev.off()
+if(!is.null(dev.list())) graphics.off()
+```
+
+## mRNA_Starve
+
+Import SE and vst transformation
+```{r}
+# Import SE object of samples
+dds_Bl_Res_ss <- readRDS(tail(grep("bl_Res_ss.rds",list.files(paste0(Data,"Output/RNA/dds_EDA_subset/bl_Res_ss"), recursive = T, full.names = T), value = T),1))
+
+# vst transformation
+vsd<-vst(dds_Bl_Res_ss, blind=T, nsub=1000, fitType = "parametric")
+```
+
+Import genesets
+```{r}
+# Import GOI for heatmap
+Heatmap_GOI_df <- read.csv(paste0(input_dir,"Heatmap_GOI.csv"))
+
+# Convert heatmap GOI to mouse
+convert_human2mouse <-merge(bm_hEGFR,Heatmap_GOI_df, by.x="hsapiens_homolog_associated_gene_name", by.y="WP_EGFR_TYROSINE_KINASE_INHIBITOR_RESISTANCE")
+
+# Extract mouse genes
+Heatmap_GOI_df <- data.frame(convert_human2mouse[,"external_gene_name"])
+
+# Rename columns
+colnames(Heatmap_GOI_df) <- c("gene_symbol")
+```
+
+Make Heatmap 
+### Fig.2F
+```{r}
+# Subset vsd to genes in GOI
+vsd_Heatmap_GOI <- vsd[row.names(vsd) %in% Heatmap_GOI_df$gene_symbol,]
+
+# Filter for top 25 variable genes
+# vsd_Heatmap_GOI <-  vsd_Heatmap_GOI[head(order(rowVars(as.matrix(assay(vsd_Heatmap_GOI))),decreasing=T), 25), ]
+
+# Extract matrix values from vsd_Heatmap_GOI
+mat <- as.matrix(assay(vsd_Heatmap_GOI))
+
+# Heatmap annotations 
+annotation_col <- HeatmapAnnotation(df = data.frame("Model" = factor(vsd_Heatmap_GOI@colData$cell_line_abbr,
+                                                    # Set legend order
+                                                    levels= c("CEv3","E4","E5","G1","G5","G8","G12")),
+                                                    "Sen" = vsd_Heatmap_GOI@colData$EGFR_TKI_sen),
+    which="column",
+    col = list("Model" =  
+  c(
+    'CEv3' = 'red',
+    'E4' = 'deepskyblue4',
+    'E5' = 'turquoise3',
+    'G1' = 'purple4',
+    'G5' = 'mediumorchid',
+    'G8' = 'deeppink',
+    'G12' = 'pink2'
+  ),
+  Sen =
+    c('Resistant'='brown',
+      'Sensitive'='blue')
+  ))
+
+# Generate Heatmap
+heatmap <- ComplexHeatmap::Heatmap(
+  t(scale(t(mat))),
+  top_annotation = annotation_col,
+  name = " ",
+  column_title = "SS_WP_EGFR_TYROSINE_KINASE_INHIBITOR_RESISTANCE",
+  show_column_names = F,
+  show_row_names = F
+  )
+
+# Save Heatmap
+pdf(file=paste0(output_dir,"SS_WP_EGFR_TKI_Res.pdf"))
+draw(heatmap)
+dev.off()
+
+# Draw Heatmap
+draw(heatmap)
+
+# Graphics termination
+if(!is.null(dev.list())) dev.off()
+if(!is.null(dev.list())) graphics.off()
+```
+
+## protein_full
+
+Import SE and vst transformation
+```{r}
+# Import Protein vsd
+DEP_Bl_Res_fs <- readRDS(tail(grep("DEP_Bl_Res_fs.rds",list.files(paste0(Data,"Output/MIB-BL/DEP_Bl_Res_fs"), recursive = T, full.names = T), value = T),1))
+DEP_Bl_Res_ss <- readRDS(tail(grep("DEP_Bl_Res_ss.rds",list.files(paste0(Data,"Output/MIB-BL/DEP_Bl_Res_ss"), recursive = T, full.names = T), value = T),1))
+
+# vst transformation
+vsd<- DEP_Bl_Res_fs 
+```
+
+Import genesets
+```{r}
+# Import GOI for heatmap
+Heatmap_GOI_df <- read.csv(paste0(input_dir,"Heatmap_GOI.csv"))
+
+# Convert heatmap GOI to mouse
+convert_human2mouse <-merge(bm_hEGFR,Heatmap_GOI_df, by.x="hsapiens_homolog_associated_gene_name", by.y="WP_EGFR_TYROSINE_KINASE_INHIBITOR_RESISTANCE")
+
+# Extract mouse genes
+Heatmap_GOI_df <- data.frame(convert_human2mouse[,"external_gene_name"])
+
+# Rename columns
+colnames(Heatmap_GOI_df) <- c("gene_symbol")
+```
+
+Make Heatmap 
+### Fig.2G
+```{r}
+# Subset vsd to genes in GOI
+vsd_Heatmap_GOI <- vsd[row.names(vsd) %in% Heatmap_GOI_df$gene_symbol,]
+
+# Filter for top 25 variable genes
+#vsd_Heatmap_GOI <-  vsd_Heatmap_GOI[head(order(rowVars(as.matrix(assay(vsd_Heatmap_GOI))),decreasing=T), 25), ]
+
+# Extract matrix values from vsd_Heatmap_GOI
+mat <- as.matrix(assay(vsd_Heatmap_GOI))
+
+# Heatmap annotations 
+annotation_col <- HeatmapAnnotation(df = data.frame("Model" = factor(vsd_Heatmap_GOI@colData$cell_line_abbr,
+                                                    # Set legend order
+                                                    levels= c("CEv3","E4","E5","G1","G5","G8","G12")),
+                                                    "Sen" = vsd_Heatmap_GOI@colData$EGFR_TKI_sen),
+    which="column",
+    col = list("Model" =  
+  c(
+    'CEv3' = 'red',
+    'E4' = 'deepskyblue4',
+    'E5' = 'turquoise3',
+    'G1' = 'purple4',
+    'G5' = 'mediumorchid',
+    'G8' = 'deeppink',
+    'G12' = 'pink2'
+  ),
+  Sen =
+    c('Resistant'='brown',
+      'Sensitive'='blue')
+  ))
+
+# Generate Heatmap
+heatmap <- ComplexHeatmap::Heatmap(
+  t(scale(t(mat))),
+  top_annotation = annotation_col,
+  name = " ",
+  column_title = "Protein_FS_WP_EGFR_TYROSINE_KINASE_INHIBITOR_RESISTANCE",
+  show_column_names = F,
+  show_row_names = T
+  )
+
+# Save Heatmap
+pdf(file=paste0(output_dir,"Protein_FS_WP_EGFR_TKI_Res.pdf"))
+draw(heatmap)
+dev.off()
+
+# Draw Heatmap
+draw(heatmap)
+
+# Graphics termination
+if(!is.null(dev.list())) dev.off()
+if(!is.null(dev.list())) graphics.off()
+```
+
+## protein_starve
+
+Import SE and vst transformation
+```{r}
+# Import Protein vsd
+DEP_Bl_Res_fs <- readRDS(tail(grep("DEP_Bl_Res_fs.rds",list.files(paste0(Data,"Output/MIB-BL/DEP_Bl_Res_fs"), recursive = T, full.names = T), value = T),1))
+DEP_Bl_Res_ss <- readRDS(tail(grep("DEP_Bl_Res_ss.rds",list.files(paste0(Data,"Output/MIB-BL/DEP_Bl_Res_ss"), recursive = T, full.names = T), value = T),1))
+
+# vst transformation
+vsd<- DEP_Bl_Res_ss 
+```
+
+Import genesets
+```{r}
+# Import GOI for heatmap
+Heatmap_GOI_df <- read.csv(paste0(input_dir,"Heatmap_GOI.csv"))
+
+# Convert heatmap GOI to mouse
+convert_human2mouse <-merge(bm_hEGFR,Heatmap_GOI_df, by.x="hsapiens_homolog_associated_gene_name", by.y="WP_EGFR_TYROSINE_KINASE_INHIBITOR_RESISTANCE")
+
+# Extract mouse genes
+Heatmap_GOI_df <- data.frame(convert_human2mouse[,"external_gene_name"])
+
+# Rename columns
+colnames(Heatmap_GOI_df) <- c("gene_symbol")
+```
+
+Make Heatmap 
+### Fig.2H
+```{r}
+# Subset vsd to genes in GOI
+vsd_Heatmap_GOI <- vsd[row.names(vsd) %in% Heatmap_GOI_df$gene_symbol,]
+
+# Filter for top 25 variable genes
+#vsd_Heatmap_GOI <-  vsd_Heatmap_GOI[head(order(rowVars(as.matrix(assay(vsd_Heatmap_GOI))),decreasing=T), 25), ]
+
+# Extract matrix values from vsd_Heatmap_GOI
+mat <- as.matrix(assay(vsd_Heatmap_GOI))
+
+# Heatmap annotations 
+annotation_col <- HeatmapAnnotation(df = data.frame("Model" = factor(vsd_Heatmap_GOI@colData$cell_line_abbr,
+                                                    # Set legend order
+                                                    levels= c("CEv3","E4","E5","G1","G5","G8","G12")),
+                                                    "Sen" = vsd_Heatmap_GOI@colData$EGFR_TKI_sen),
+    which="column",
+    col = list("Model" =  
+  c(
+    'CEv3' = 'red',
+    'E4' = 'deepskyblue4',
+    'E5' = 'turquoise3',
+    'G1' = 'purple4',
+    'G5' = 'mediumorchid',
+    'G8' = 'deeppink',
+    'G12' = 'pink2'
+  ),
+  Sen =
+    c('Resistant'='brown',
+      'Sensitive'='blue')
+  ))
+
+# Generate Heatmap
+heatmap <- ComplexHeatmap::Heatmap(
+  t(scale(t(mat))),
+  top_annotation = annotation_col,
+  name = " ",
+  column_title = "Protein_SS_WP_EGFR_TYROSINE_KINASE_INHIBITOR_RESISTANCE",
+  show_column_names = F,
+  show_row_names = T
+  )
+
+# Save Heatmap
+pdf(file=paste0(output_dir,"Protein_SS_WP_EGFR_TKI_Res.pdf"))
+draw(heatmap)
+dev.off()
+
+# Draw Heatmap
+draw(heatmap)
+
+# Graphics termination
+if(!is.null(dev.list())) dev.off()
+if(!is.null(dev.list())) graphics.off()
+```
+
+# Resistance cell lines volcano plots
+
+Directories
+```{r}
+fig.label <- paste0("Res_signature_volcanos")
+figures_dir <- paste0(Data,"Figures/",fig.label,"/")
+dir.create(figures_dir)
+
+```
+
+## fs
+### Import Limma Res fs 
+#### S.4A-F
+```{r}
+
+fig.label <- paste0("Res_signature_volcanos")
+figures_dir <- paste0(Data,"Figures/",fig.label,"/")
+dir.create(figures_dir)
+
+# limma results direct
+output_dir_res <- paste0(Data,"Output/MIB-BL/DEP_Bl_Res_fs/","Limma_res/")
+
+# Summarize of comparisions
+comps <- read.csv(paste0(Data,"Output/MIB-BL/DEP_Bl_Res_fs/","comps_all.csv"), row.names = 1)
+
+# import limma res
+subset_limmaRes <- list()
+for (i in seq_along(row.names(comps))){
+  subset_limmaRes[[comps$comp[i]]] <-
+  read.csv(paste0(output_dir_res,"comp_",i,"_",comps[i,5],".csv"), row.names = 1)
+}
+
+# Extract comps of interest
+coi <- comps[comps$comp_denom %in% c("CEv3.full"),]$comp
+comp_list_oi <- subset_limmaRes[names(subset_limmaRes) %in% coi]
+
+
+# Plot Volcano
+volcano_plots_ls <- list()
+for (i in seq_along(comp_list_oi)){
+  plot(volcano_plots_ls[[names(comp_list_oi)[i]]] <- 
+    EnhancedVolcano(
+      comp_list_oi[[i]], 
+      lab=row.names(comp_list_oi[[i]]),
+      x="logFC",
+      y="adj.P.Val",
+      title= paste0("Protein ",names(comp_list_oi)[[i]]),
+      pCutoff =0.05, 
+      #FCcutoff =lfc,
+      pointSize = 2.0, 
+      labSize = 5.0 
+    ))}
+
+# Save Volcano
+for (i in seq_along(volcano_plots_ls)){
+ggsave(filename = paste0(figures_dir,"comp_", i, "_", names(volcano_plots_ls)[[i]],".pdf"), plot=volcano_plots_ls[[i]])
+}
+
+
+
+```
+
+## ss 
+
+### Import Limma Res ss
+#### S.5A-F
+```{r}
+# limma results direct
+output_dir_res <- paste0(Data,"Output/MIB-BL/DEP_Bl_Res_ss/","Limma_res/")
+
+# Summarize of comparisions
+comps <- read.csv(paste0(Data,"Output/MIB-BL/DEP_Bl_Res_ss/","comps_all.csv"), row.names = 1)
+
+# import limma res
+subset_limmaRes <- list()
+for (i in seq_along(row.names(comps))){
+  subset_limmaRes[[comps$comp[i]]] <-
+  read.csv(paste0(output_dir_res,"comp_",i,"_",comps[i,5],".csv"), row.names = 1)
+}
+
+# Extract comps of interest
+coi <- comps[comps$comp_denom %in% c("CEv3.starve"),]$comp
+comp_list_oi <- subset_limmaRes[names(subset_limmaRes) %in% coi]
+
+
+# Plot Volcano
+volcano_plots_ls <- list()
+for (i in seq_along(comp_list_oi)){
+  plot(volcano_plots_ls[[names(comp_list_oi)[i]]] <- 
+    EnhancedVolcano(
+      comp_list_oi[[i]], 
+      lab=row.names(comp_list_oi[[i]]),
+      x="logFC",
+      y="adj.P.Val",
+      title= paste0("Protein ",names(comp_list_oi)[[i]]),
+      pCutoff =0.05, 
+      #FCcutoff =lfc,
+      pointSize = 2.0, 
+      labSize = 5.0 
+    ))}
+
+# Save Volcano
+for (i in seq_along(volcano_plots_ls)){
+ggsave(filename = paste0(figures_dir,"comp_", i, "_", names(volcano_plots_ls)[[i]],".pdf"), plot=volcano_plots_ls[[i]])
+}
+
+
+
+```
+
+
+# Baseline_kinase_upset
+
+Setup
+```{r}
+# Clean environment
+rm(list = ls())
+gc()
+
+# Import setup workspace
+load(paste0("/Data/Input/Figures/setup_workspace.RData"))
+```
+
+Directories
+```{r}
+fig.label <- paste0("Baseline_kinase_upset")
+input_dir <- paste0(Data,"Input/Figures/",fig.label,"/")
+figures_dir <- paste0(Data,"Figures/",fig.label,"/")
+dir.create(figures_dir)
+
+```
+
+
+Import Limma Res fs
+```{r}
+DEP_Bl_Res_fs_limma_res_padj <- read.csv(paste0(Data,"/Output/MIB-BL/DEP_Bl_Res_fs/Limma_res/","All_coi_padj.csv"), row.names = 1)
+
+# Extract significant genes
+E4_sig_genes <- row.names(subset(DEP_Bl_Res_fs_limma_res_padj, DEP_Bl_Res_fs_limma_res_padj$adj.P.Val_E4.full.CEv3.full<0.05))
+E5_sig_genes <- row.names(subset(DEP_Bl_Res_fs_limma_res_padj, DEP_Bl_Res_fs_limma_res_padj$adj.P.Val_E5.full.CEv3.full<0.05))
+G1_sig_genes <- row.names(subset(DEP_Bl_Res_fs_limma_res_padj, DEP_Bl_Res_fs_limma_res_padj$adj.P.Val_G1.full.CEv3.full<0.05))
+G5_sig_genes <- row.names(subset(DEP_Bl_Res_fs_limma_res_padj, DEP_Bl_Res_fs_limma_res_padj$adj.P.Val_G5.full.CEv3.full<0.05))
+G8_sig_genes <- row.names(subset(DEP_Bl_Res_fs_limma_res_padj, DEP_Bl_Res_fs_limma_res_padj$adj.P.Val_G8.full.CEv3.full<0.05))
+G12_sig_genes <- row.names(subset(DEP_Bl_Res_fs_limma_res_padj, DEP_Bl_Res_fs_limma_res_padj$adj.P.Val_G12.full.CEv3.full<0.05))
+
+# Convert to list
+DEP_Bl_Res_fs_sigGenes_ls <- list(
+  E4_fs=E4_sig_genes,
+  E5_fs=E5_sig_genes,
+  G1_fs=G1_sig_genes,
+  G5_fs=G5_sig_genes,
+  G8_fs=G8_sig_genes,
+  G12_fs=G12_sig_genes
+)
+
+# Remove hEGFR
+DEP_Bl_Res_fs_sigGenes_ls <- lapply(DEP_Bl_Res_fs_sigGenes_ls, function(x) subset(x,!x=="hEGFR"))
+
+```
+
+
+## Upset Plot fs
+### Fig.3A
+```{r}
+# Directories 
+output_dir_upset <- paste0(figures_dir)
+graph_dir_upset <- paste0(figures_dir)
+
+
+# Convert list to binary matrix
+Upset_matrix <- ComplexHeatmap::list_to_matrix(DEP_Bl_Res_fs_sigGenes_ls)
+
+# Save Upset_matrix
+write.csv(Upset_matrix, file = paste0(output_dir_upset, "baseline_FS_upset_matrix",".csv"))
+
+# convert list to combination matrix
+combo_matrix <- ComplexHeatmap::make_comb_mat(Upset_matrix)
+
+# Color by intersection
+intersection_degree <- comb_degree(combo_matrix)
+comb_col <- ifelse(intersection_degree > 1, "blue", "red")
+
+
+# Generate upset plot
+upset_plot <- ComplexHeatmap::UpSet(combo_matrix, comb_col = comb_col,
+                        row_names_gp =gpar(fontsize = 12) ,
+                        top_annotation = upset_top_annotation(
+                          combo_matrix, 
+                          add_numbers = TRUE, 
+                          numbers_gp = gpar(fontsize = 11),
+                          numbers_rot=0,  
+                          annotation_name_rot = 90, 
+                          axis_param=list (gp = gpar(fontsize = 11)),
+                          annotation_name_gp= gpar(fontsize = 14)),
+                        right_annotation = upset_right_annotation(
+                          combo_matrix, 
+                          add_numbers = TRUE, 
+                          numbers_gp = gpar(fontsize = 11),
+                          numbers_rot=0,
+                          axis_param=list (gp = gpar(fontsize = 11)),
+                          annotation_name_gp= gpar(fontsize = 14)),
+                        pt_size = unit(8, "pt"))
+
+upset_plot
+
+# Save upset_plot
+pdf(file=paste0(graph_dir_upset, "baseline_FS_upset" , ".pdf"))
+draw(upset_plot)
+dev.off()
+
+# Combination matrix
+combo_matrix
+comb_name(combo_matrix)
+
+# Extract all from upset plot
+upset_genes_ls <- list()
+for(i in seq_along(comb_name(combo_matrix))){
+  upset_genes_ls[[paste0((set_name(combo_matrix)["1"==strsplit(comb_name(combo_matrix)[i],"")[[1]]])[1],"_",(set_name(combo_matrix)["1"==strsplit(comb_name(combo_matrix)[i],"")[[1]]])[2],"_",(set_name(combo_matrix)["1"==strsplit(comb_name(combo_matrix)[i],"")[[1]]])[3],"_",(set_name(combo_matrix)["1"==strsplit(comb_name(combo_matrix)[i],"")[[1]]])[4],"_",(set_name(combo_matrix)["1"==strsplit(comb_name(combo_matrix)[i],"")[[1]]])[5],"_",(set_name(combo_matrix)["1"==strsplit(comb_name(combo_matrix)[i],"")[[1]]])[6])]] <-
+    extract_comb(combo_matrix,comb_name(combo_matrix)[i])
+}
+
+# Convert to DF
+upset_genes_df <- do.call(cbind, lapply(upset_genes_ls, function(x) c(x, rep(NA, max(sapply(upset_genes_ls, length)) - length(x)))))
+
+# Save genes
+write.csv(upset_genes_df, file = paste0(output_dir_upset,"baseline_FS_upset_genes_df",".csv"))
+
+# Extract unique genes
+grep("NA_NA_NA_NA_NA",colnames(upset_genes_df))
+DEP_Bl_Res_fs_unique_genes <- c()
+for(i in (grep("NA_NA_NA_NA_NA",colnames(upset_genes_df)))){
+  DEP_Bl_Res_fs_unique_genes<- c(DEP_Bl_Res_fs_unique_genes,upset_genes_df[,i][!is.na( upset_genes_df[,i])])
+}
+
+# Subset unique genes DF
+DEP_Bl_Res_fs_unique_genes_df <- upset_genes_df[,colnames(upset_genes_df)[grep("NA_NA_NA_NA_NA",colnames(upset_genes_df))]]
+colnames(DEP_Bl_Res_fs_unique_genes_df) <- gsub("_NA_NA_NA_NA_NA","",colnames(DEP_Bl_Res_fs_unique_genes_df))
+
+# Convert to list
+DEP_Bl_Res_fs_unique_genes_ls <- list()
+for (i in seq_along(colnames(DEP_Bl_Res_fs_unique_genes_df))){
+  DEP_Bl_Res_fs_unique_genes_ls[[colnames(DEP_Bl_Res_fs_unique_genes_df)[i]]] <-
+    c(DEP_Bl_Res_fs_unique_genes_df[,i][!is.na(DEP_Bl_Res_fs_unique_genes_df[,i])])
+}
+
+
+# Extract overlapping genes column names
+colnames(upset_genes_df)[(grep("NA_NA_NA_NA_NA",colnames(upset_genes_df), invert = T))]
+
+# Extract overlapping genes
+DEP_Bl_Res_fs_ol_genes <- c()
+for (i in (colnames(upset_genes_df)[(grep("NA_NA_NA_NA_NA",colnames(upset_genes_df), invert = T))])){
+  DEP_Bl_Res_fs_ol_genes <-
+    c(DEP_Bl_Res_fs_ol_genes,upset_genes_df[,i][!is.na( upset_genes_df[,i] )])
+
+}
+
+
+```
+
+Import Limma Res ss
+```{r}
+DEP_Bl_Res_ss_limma_res_padj <- read.csv(paste0(Data,"/Output/MIB-BL/DEP_Bl_Res_ss/Limma_res/","All_coi_padj.csv"), row.names = 1)
+
+DEP_Bl_Res_ss_limma_res_lfc <- read.csv(paste0(Data,"/Output/MIB-BL/DEP_Bl_Res_ss/Limma_res/","All_coi_l2fc.csv"), row.names = 1)
+
+
+# Extract significant genes
+E4_sig_genes <- row.names(subset(DEP_Bl_Res_ss_limma_res_padj, DEP_Bl_Res_ss_limma_res_padj$adj.P.Val_E4.starve.CEv3.starve<0.05))
+E5_sig_genes <- row.names(subset(DEP_Bl_Res_ss_limma_res_padj, DEP_Bl_Res_ss_limma_res_padj$adj.P.Val_E5.starve.CEv3.starve<0.05))
+G1_sig_genes <- row.names(subset(DEP_Bl_Res_ss_limma_res_padj, DEP_Bl_Res_ss_limma_res_padj$adj.P.Val_G1.starve.CEv3.starve<0.05))
+G5_sig_genes <- row.names(subset(DEP_Bl_Res_ss_limma_res_padj, DEP_Bl_Res_ss_limma_res_padj$adj.P.Val_G5.starve.CEv3.starve<0.05))
+G8_sig_genes <- row.names(subset(DEP_Bl_Res_ss_limma_res_padj, DEP_Bl_Res_ss_limma_res_padj$adj.P.Val_G8.starve.CEv3.starve<0.05))
+G12_sig_genes <- row.names(subset(DEP_Bl_Res_ss_limma_res_padj, DEP_Bl_Res_ss_limma_res_padj$adj.P.Val_G12.starve.CEv3.starve<0.05))
+
+
+# Convert to list
+DEP_Bl_Res_ss_sigGenes_ls <- list(
+  E4_ss=E4_sig_genes,
+  E5_ss=E5_sig_genes,
+  G1_ss=G1_sig_genes,
+  G5_ss=G5_sig_genes,
+  G8_ss=G8_sig_genes,
+  G12_ss=G12_sig_genes
+)
+
+# Remove hEGFR
+DEP_Bl_Res_ss_sigGenes_ls <- lapply(DEP_Bl_Res_ss_sigGenes_ls, function(x) subset(x,!x=="hEGFR"))
+```
+
+
+## Upset Plot ss
+### Fig.3B
+```{r}
+# Directories 
+output_dir_upset <- paste0(figures_dir)
+graph_dir_upset <- paste0(figures_dir)
+
+
+# Convert list to binary matrix
+Upset_matrix <- ComplexHeatmap::list_to_matrix(DEP_Bl_Res_ss_sigGenes_ls)
+
+# Save Upset_matrix
+write.csv(Upset_matrix, file = paste0(output_dir_upset, "baseline_ss_upset_matrix",".csv"))
+
+# convert list to combination matrix
+combo_matrix <- ComplexHeatmap::make_comb_mat(Upset_matrix)
+
+# Color by intersection
+intersection_degree <- comb_degree(combo_matrix)
+comb_col <- ifelse(intersection_degree > 1, "blue", "red")
+
+
+# Generate upset plot
+upset_plot <- ComplexHeatmap::UpSet(combo_matrix, comb_col = comb_col,
+                        row_names_gp =gpar(fontsize = 12) ,
+                        top_annotation = upset_top_annotation(
+                          combo_matrix, 
+                          add_numbers = TRUE, 
+                          numbers_gp = gpar(fontsize = 11),
+                          numbers_rot=0,  
+                          annotation_name_rot = 90, 
+                          axis_param=list (gp = gpar(fontsize = 11)),
+                          annotation_name_gp= gpar(fontsize = 14)),
+                        right_annotation = upset_right_annotation(
+                          combo_matrix, 
+                          add_numbers = TRUE, 
+                          numbers_gp = gpar(fontsize = 11),
+                          numbers_rot=0,
+                          axis_param=list (gp = gpar(fontsize = 11)),
+                          annotation_name_gp= gpar(fontsize = 14)),
+                        pt_size = unit(8, "pt"))
+
+upset_plot
+
+# Save upset_plot
+pdf(file=paste0(graph_dir_upset, "baseline_ss_upset" , ".pdf"))
+draw(upset_plot)
+dev.off()
+
+# Combination matrix
+combo_matrix
+comb_name(combo_matrix)
+
+# Extract all from upset plot
+upset_genes_ls <- list()
+for(i in seq_along(comb_name(combo_matrix))){
+  upset_genes_ls[[paste0((set_name(combo_matrix)["1"==strsplit(comb_name(combo_matrix)[i],"")[[1]]])[1],"_",(set_name(combo_matrix)["1"==strsplit(comb_name(combo_matrix)[i],"")[[1]]])[2],"_",(set_name(combo_matrix)["1"==strsplit(comb_name(combo_matrix)[i],"")[[1]]])[3],"_",(set_name(combo_matrix)["1"==strsplit(comb_name(combo_matrix)[i],"")[[1]]])[4],"_",(set_name(combo_matrix)["1"==strsplit(comb_name(combo_matrix)[i],"")[[1]]])[5],"_",(set_name(combo_matrix)["1"==strsplit(comb_name(combo_matrix)[i],"")[[1]]])[6])]] <-
+    extract_comb(combo_matrix,comb_name(combo_matrix)[i])
+}
+
+# Convert to DF
+upset_genes_df <- do.call(cbind, lapply(upset_genes_ls, function(x) c(x, rep(NA, max(sapply(upset_genes_ls, length)) - length(x)))))
+
+# Save genes
+write.csv(upset_genes_df, file = paste0(output_dir_upset,"baseline_ss_upset_genes_df",".csv"))
+
+# Extract unique genes
+grep("NA_NA_NA_NA_NA",colnames(upset_genes_df))
+DEP_Bl_Res_ss_unique_genes <- c()
+for(i in (grep("NA_NA_NA_NA_NA",colnames(upset_genes_df)))){
+  DEP_Bl_Res_ss_unique_genes<- c(DEP_Bl_Res_ss_unique_genes,upset_genes_df[,i][!is.na( upset_genes_df[,i])])
+}
+
+# Subset unique genes DF
+DEP_Bl_Res_ss_unique_genes_df <- upset_genes_df[,colnames(upset_genes_df)[grep("NA_NA_NA_NA_NA",colnames(upset_genes_df))]]
+colnames(DEP_Bl_Res_ss_unique_genes_df) <- gsub("_NA_NA_NA_NA_NA","",colnames(DEP_Bl_Res_ss_unique_genes_df))
+
+# Convert to list
+DEP_Bl_Res_ss_unique_genes_ls <- list()
+for (i in seq_along(colnames(DEP_Bl_Res_ss_unique_genes_df))){
+  DEP_Bl_Res_ss_unique_genes_ls[[colnames(DEP_Bl_Res_ss_unique_genes_df)[i]]] <-
+    c(DEP_Bl_Res_ss_unique_genes_df[,i][!is.na(DEP_Bl_Res_ss_unique_genes_df[,i])])
+}
+
+
+# Extract overlapping genes column names
+colnames(upset_genes_df)[(grep("NA_NA_NA_NA_NA",colnames(upset_genes_df), invert = T))]
+
+# Extract overlapping genes
+DEP_Bl_Res_ss_ol_genes <- c()
+for (i in (colnames(upset_genes_df)[(grep("NA_NA_NA_NA_NA",colnames(upset_genes_df), invert = T))])){
+  DEP_Bl_Res_ss_ol_genes <-
+    c(DEP_Bl_Res_ss_ol_genes,upset_genes_df[,i][!is.na( upset_genes_df[,i] )])
+
+}
+
+
+```
+
+
+```{r}
+# fs and ss kinases that are not shared among any clone will be combined to generate the clone specific signature. Unique kinases identified in fs serum condition but are not unique in ss serum condition will be removed and vice versa. We have identified these genes as "intersect_genes"
+
+# Lise to compare
+
+# DEP_Bl_Res_fs_unique_genes_ls
+# DEP_Bl_Res_ss_unique_genes_ls
+# DEP_Bl_Res_fs_ol_genes
+# DEP_Bl_Res_ss_ol_genes
+
+
+
+fs_unique <- c()
+for (i in seq_along(DEP_Bl_Res_fs_unique_genes_ls)){
+  genes <- c(DEP_Bl_Res_fs_unique_genes_ls[[i]])
+  fs_unique <- c(fs_unique,genes)
+}
+
+fs_ol <- c()
+for (i in seq_along(DEP_Bl_Res_fs_ol_genes)){
+  genes <- c(DEP_Bl_Res_fs_ol_genes[[i]])
+  fs_ol <- c(fs_ol,genes)
+}
+
+ss_unique <- c()
+for (i in seq_along(DEP_Bl_Res_ss_unique_genes_ls)){
+  genes <- c(DEP_Bl_Res_ss_unique_genes_ls[[i]])
+  ss_unique <- c(ss_unique,genes)
+}
+
+ss_ol <- c()
+for (i in seq_along(DEP_Bl_Res_ss_ol_genes)){
+  genes <- c(DEP_Bl_Res_ss_ol_genes[[i]])
+  ss_ol <- c(ss_ol,genes)
+}
+
+# Genes that intersect
+intersect(fs_unique,ss_ol)
+intersect(fs_ol,ss_unique)
+intersect_genes <- c(intersect(fs_unique,ss_ol),intersect(fs_ol,ss_unique) )
+intersect_genes
+
+```
+
+## Upset of Clone specific signatures
+### Fig.3C
+```{r}
+
+# These are genes that change in only 1 resistant line
+# DEP_Bl_Res_fs_unique_genes_ls
+# DEP_Bl_Res_ss_unique_genes_ls
+
+# Filter out intersecting genes
+filt_DEP_Bl_Res_fs_unique_genes_ls <- lapply(DEP_Bl_Res_fs_unique_genes_ls, function(x) x[!(x %in% intersect_genes)])
+filt_DEP_Bl_Res_ss_unique_genes_ls <- lapply(DEP_Bl_Res_ss_unique_genes_ls, function(x) x[!(x %in% intersect_genes)])
+
+# Combine fs and ss genes
+DEP_Bl_Res_unique_genes_ls <- c(filt_DEP_Bl_Res_fs_unique_genes_ls,filt_DEP_Bl_Res_ss_unique_genes_ls)
+
+# Directories 
+output_dir_upset <- paste0(figures_dir)
+graph_dir_upset <- paste0(figures_dir)
+
+# Convert list to binary matrix
+Upset_matrix <- ComplexHeatmap::list_to_matrix(DEP_Bl_Res_unique_genes_ls)
+
+# Save Upset_matrix
+write.csv(Upset_matrix, file = paste0(output_dir_upset, "Baseline_Clone_Kinase_Sig_Upset_matrix",".csv"))
+
+# convert list to combination matrix
+combo_matrix <- ComplexHeatmap::make_comb_mat(Upset_matrix)
+
+# Generate upset plot
+upset_plot <- ComplexHeatmap::UpSet(combo_matrix, comb_col = "red" ,
+                        row_names_gp =gpar(fontsize = 12) ,
+                        top_annotation = upset_top_annotation(
+                          combo_matrix, 
+                          add_numbers = TRUE, 
+                          numbers_gp = gpar(fontsize = 11),
+                          numbers_rot=0,  
+                          annotation_name_rot = 90, 
+                          axis_param=list (gp = gpar(fontsize = 11)),
+                          annotation_name_gp= gpar(fontsize = 14)),
+                        right_annotation = upset_right_annotation(
+                          combo_matrix, 
+                          add_numbers = TRUE, 
+                          numbers_gp = gpar(fontsize = 11),
+                          numbers_rot=0,
+                          axis_param=list (gp = gpar(fontsize = 11)),
+                          annotation_name_gp= gpar(fontsize = 14)),
+                        pt_size = unit(8, "pt"))
+
+upset_plot
+
+# Save upset_plot
+pdf(file=paste0(graph_dir_upset, "Baseline_Clone_Kinase_Sig_Upset" , ".pdf"))
+draw(upset_plot)
+dev.off()
+
+# Combination matrix
+combo_matrix
+comb_name(combo_matrix)
+
+# Extract all from upset plot
+upset_genes_ls <- list()
+for(i in seq_along(comb_name(combo_matrix))){
+  upset_genes_ls[[paste0((set_name(combo_matrix)["1"==strsplit(comb_name(combo_matrix)[i],"")[[1]]])[1],"_",(set_name(combo_matrix)["1"==strsplit(comb_name(combo_matrix)[i],"")[[1]]])[2],"_",(set_name(combo_matrix)["1"==strsplit(comb_name(combo_matrix)[i],"")[[1]]])[3],"_",(set_name(combo_matrix)["1"==strsplit(comb_name(combo_matrix)[i],"")[[1]]])[4],"_",(set_name(combo_matrix)["1"==strsplit(comb_name(combo_matrix)[i],"")[[1]]])[5],"_",(set_name(combo_matrix)["1"==strsplit(comb_name(combo_matrix)[i],"")[[1]]])[6],"_",(set_name(combo_matrix)["1"==strsplit(comb_name(combo_matrix)[i],"")[[1]]])[7],"_",(set_name(combo_matrix)["1"==strsplit(comb_name(combo_matrix)[i],"")[[1]]])[8],"_",(set_name(combo_matrix)["1"==strsplit(comb_name(combo_matrix)[i],"")[[1]]])[9],"_",(set_name(combo_matrix)["1"==strsplit(comb_name(combo_matrix)[i],"")[[1]]])[10],"_",(set_name(combo_matrix)["1"==strsplit(comb_name(combo_matrix)[i],"")[[1]]])[11])]] <-
+    extract_comb(combo_matrix,comb_name(combo_matrix)[i])
+}
+
+# Convert to DF
+upset_genes_df <- do.call(cbind, lapply(upset_genes_ls, function(x) c(x, rep(NA, max(sapply(upset_genes_ls, length)) - length(x)))))
+
+
+# Save genes
+write.csv(upset_genes_df, file = paste0(output_dir_upset,"Baseline_Clone_Kinase_Sig_genes_df",".csv"))
+
+# Extract unique genes
+grep("_NA_NA_NA_NA_NA_NA_NA_NA_NA_NA",colnames(upset_genes_df))
+DEP_Bl_Res_unique_genes_ol <- c()
+for(i in (grep("_NA_NA_NA_NA_NA_NA_NA_NA_NA_NA",colnames(upset_genes_df)))){
+  DEP_Bl_Res_unique_genes_ol<- c(DEP_Bl_Res_unique_genes_ol,upset_genes_df[,i][!is.na( upset_genes_df[,i])])
+}
+
+# Subset unique genes DF
+DEP_Bl_Res_unique_genes_ol_df <- upset_genes_df[,colnames(upset_genes_df)[grep("_NA_NA_NA_NA_NA_NA_NA_NA_NA_NA",colnames(upset_genes_df))]]
+colnames(DEP_Bl_Res_unique_genes_ol_df) <- gsub("_NA_NA_NA_NA_NA_NA_NA_NA_NA_NA","",colnames(DEP_Bl_Res_unique_genes_ol_df))
+
+# Convert to list
+DEP_Bl_Res_unique_genes_ol_ls <- list()
+for (i in seq_along(colnames(DEP_Bl_Res_unique_genes_ol_df))){
+  DEP_Bl_Res_unique_genes_ol_ls[[colnames(DEP_Bl_Res_unique_genes_ol_df)[i]]] <-
+    c(DEP_Bl_Res_unique_genes_ol_df[,i][!is.na(DEP_Bl_Res_unique_genes_ol_df[,i])])
+}
+
+# Extract overlapping genes column names
+colnames(upset_genes_df)[(grep("_NA_NA_NA_NA_NA_NA_NA_NA_NA_NA",colnames(upset_genes_df), invert = T))]
+
+# Extract overlapping genes
+DEP_Bl_Res_unique_genes_ol_ol_genes <- c()
+for (i in (colnames(upset_genes_df)[(grep("_NA_NA_NA_NA_NA_NA_NA_NA_NA_NA",colnames(upset_genes_df), invert = T))])){
+  DEP_Bl_Res_unique_genes_ol_ol_genes <-
+    c(DEP_Bl_Res_unique_genes_ol_ol_genes,upset_genes_df[,i][!is.na( upset_genes_df[,i] )])
+
+}
+
+```
+
+## Save Unique Basline signatures
+```{r}
+DEP_Bl_Res_unique_genes_ol_ls
+
+names(DEP_Bl_Res_unique_genes_ol_ls)
+
+E5_BL_sig <- DEP_Bl_Res_unique_genes_ol_ls[["E5_fs"]]
+G1_BL_sig <- DEP_Bl_Res_unique_genes_ol_ls[["G1_fs"]]
+G5_BL_sig <- DEP_Bl_Res_unique_genes_ol_ls[["G5_fs"]]
+G8_BL_sig <- DEP_Bl_Res_unique_genes_ol_ls[["G8_fs"]]
+G12_BL_sig <- c(DEP_Bl_Res_unique_genes_ol_ls[["G12_fs"]],DEP_Bl_Res_unique_genes_ol_ls[["G12_ss"]])
+
+BL_sig_ls <- list(E5_BL_sig=E5_BL_sig,
+                  G1_BL_sig=G1_BL_sig,
+                  G5_BL_sig=G5_BL_sig,
+                  G8_BL_sig=G8_BL_sig,
+                  G12_BL_sig=G12_BL_sig)
+
+
+BL_sig_df <- do.call(cbind, lapply(BL_sig_ls, function(x) c(x, rep(NA, max(sapply(BL_sig_ls, length)) - length(x)))))
+
+write.csv(BL_sig_df, file = paste0(output_dir_upset,"Clone_baseline_sig",".csv"), na="")
+
+```
+
+## Shared_kinase_sig
+### Fig.3D
+```{r}
+
+# These are kinases that change in more than one resistant line. 
+# DEP_Bl_Res_fs_ol_genes
+# DEP_Bl_Res_ss_ol_genes
+
+# Filter out intersecting genes
+filt_DEP_Bl_Res_fs_ol_genes <- DEP_Bl_Res_fs_ol_genes[!(DEP_Bl_Res_fs_ol_genes %in% intersect_genes)]
+filt_DEP_Bl_Res_ss_ol_genes <- DEP_Bl_Res_ss_ol_genes[!(DEP_Bl_Res_ss_ol_genes %in% intersect_genes)]
+
+# Combine fs and ss genes
+serum_unique_genes_ls <- list(fs = filt_DEP_Bl_Res_fs_ol_genes,
+                              ss = filt_DEP_Bl_Res_ss_ol_genes)
+
+# Directories 
+output_dir_upset <- paste0(figures_dir)
+graph_dir_upset <- paste0(figures_dir)
+
+
+# Convert list to binary matrix
+Upset_matrix <- ComplexHeatmap::list_to_matrix(serum_unique_genes_ls)
+
+# Save Upset_matrix
+write.csv(Upset_matrix, file = paste0(output_dir_upset, "Shared_kinase_Upset_matrix",".csv"))
+
+# convert list to combination matrix
+combo_matrix <- ComplexHeatmap::make_comb_mat(Upset_matrix)
+
+# Generate upset plot
+upset_plot <- ComplexHeatmap::UpSet(combo_matrix, comb_col = "blue" ,
+                        row_names_gp =gpar(fontsize = 12) ,
+                        top_annotation = upset_top_annotation(
+                          combo_matrix, 
+                          add_numbers = TRUE, 
+                          numbers_gp = gpar(fontsize = 11),
+                          numbers_rot=0,  
+                          annotation_name_rot = 90, 
+                          axis_param=list (gp = gpar(fontsize = 11)),
+                          annotation_name_gp= gpar(fontsize = 14)),
+                        right_annotation = upset_right_annotation(
+                          combo_matrix, 
+                          add_numbers = TRUE, 
+                          numbers_gp = gpar(fontsize = 11),
+                          numbers_rot=0,
+                          axis_param=list (gp = gpar(fontsize = 11)),
+                          annotation_name_gp= gpar(fontsize = 14)),
+                        pt_size = unit(8, "pt"))
+
+upset_plot
+
+# Save upset_plot
+pdf(file=paste0(graph_dir_upset, "Shared_kinase_Upset" , ".pdf"))
+draw(upset_plot)
+dev.off()
+
+# Combination matrix
+combo_matrix
+comb_name(combo_matrix)
+
+# Extract all from upset plot
+upset_genes_ls <- list()
+for(i in seq_along(comb_name(combo_matrix))){
+  upset_genes_ls[[paste0((set_name(combo_matrix)["1"==strsplit(comb_name(combo_matrix)[i],"")[[1]]])[1],"_",(set_name(combo_matrix)["1"==strsplit(comb_name(combo_matrix)[i],"")[[1]]])[2])]] <-
+    extract_comb(combo_matrix,comb_name(combo_matrix)[i])
+}
+
+# Convert to DF
+upset_genes_df <- do.call(cbind, lapply(upset_genes_ls, function(x) c(x, rep(NA, max(sapply(upset_genes_ls, length)) - length(x)))))
+
+
+# Save genes
+write.csv(upset_genes_df, file = paste0(output_dir_upset,"Shared_kinase_upset_genes_df",".csv"))
+
+# Extract fs_ss Ol
+fs_ss_ol_kinases <- data.frame(upset_genes_df)["fs_ss"][!is.na(data.frame(upset_genes_df)["fs_ss"])]
+
+```
+
+## All_Baseline_kinase_sig
+```{r}
+DEP_Bl_Res_unique_genes_ol_ls
+
+names(DEP_Bl_Res_unique_genes_ol_ls)
+
+E5_BL_sig <- c(DEP_Bl_Res_unique_genes_ol_ls[["E5_fs"]],DEP_Bl_Res_unique_genes_ol_ls[["E5_ss"]])
+G1_BL_sig <- c(DEP_Bl_Res_unique_genes_ol_ls[["G1_fs"]],DEP_Bl_Res_unique_genes_ol_ls[["G1_ss"]])
+G5_BL_sig <- c(DEP_Bl_Res_unique_genes_ol_ls[["G5_fs"]],DEP_Bl_Res_unique_genes_ol_ls[["G5_ss"]])
+G8_BL_sig <- c(DEP_Bl_Res_unique_genes_ol_ls[["G8_fs"]],DEP_Bl_Res_unique_genes_ol_ls[["G8_ss"]])
+G12_BL_sig <- c(DEP_Bl_Res_unique_genes_ol_ls[["G12_fs"]],DEP_Bl_Res_unique_genes_ol_ls[["G12_ss"]])
+
+# Genes that overlap and are not influenced by serum
+OL_BL_sig <- intersect(serum_unique_genes_ls[["fs"]],serum_unique_genes_ls[["ss"]])
+
+BL_sig_ls <- list(E5_BL_sig=E5_BL_sig,
+                  G1_BL_sig=G1_BL_sig,
+                  G5_BL_sig=G5_BL_sig,
+                  G8_BL_sig=G8_BL_sig,
+                  G12_BL_sig=G12_BL_sig,
+                  OL_BL_sig=OL_BL_sig)
+
+BL_sig_df <- do.call(cbind, lapply(BL_sig_ls, function(x) c(x, rep(NA, max(sapply(BL_sig_ls, length)) - length(x)))))
+
+# Save CSV
+write.csv(BL_sig_df, file = paste0(output_dir_upset,"All_baseline_kinase_sig",".csv"), na="")
+
+
+# Sanity check. There should be no differences between the baseline signatures generated in this Figures script compared to the EDA script.
+
+# Import figures sigs
+BL_sig_df_figures <- read.csv(paste0(output_dir_upset,"All_baseline_kinase_sig.csv"), header =TRUE, fileEncoding = "UTF-8-BOM", row.names = 1, na.strings = NA)
+
+# Import EDA sigs
+BL_sig_df_EDA <- read.csv("/Data/Output/MIB_BL_sig/ss_fs_ol/BL_sig.csv", header =TRUE, fileEncoding = "UTF-8-BOM", row.names = 1, na.strings = NA)
+
+# Compare results
+waldo::compare(BL_sig_df_figures,BL_sig_df_EDA)
+```
+
+<!-- PCA of Clone specific signature -->
+<!-- ```{r} -->
+<!-- # Directories  -->
+<!-- output_dir_pca <- paste0(figures_dir) -->
+<!-- graph_dir_pca <- paste0(figures_dir) -->
+
+<!-- # Genes in unique clone speciifc kinase signature -->
+<!-- DEP_Bl_Res_cb_unique_genes <- DEP_Bl_Res_unique_genes_ol -->
+
+<!-- # bl_Res_fs -->
+<!-- bl_Res_fs <- readRDS(tail(grep("bl_Res_fs.rds",list.files(paste0(Data,"Output/RNA/dds_EDA_subset/bl_Res_fs"), recursive = T, full.names = T), value = T),1)) -->
+
+<!-- # bl_Res_ss -->
+<!-- bl_Res_ss <- readRDS(tail(grep("bl_Res_ss.rds",list.files(paste0(Data,"Output/RNA/dds_EDA_subset/bl_Res_ss"), recursive = T, full.names = T), value = T),1)) -->
+
+
+<!-- # bl_Res_all -->
+<!-- # Combined full and starved RNA -->
+<!-- bl_Res_all <- cbind(bl_Res_ss,bl_Res_fs) -->
+
+<!-- vsd <- vst(bl_Res_all, blind = T) -->
+<!-- sig_dds_Res_ss <- vsd[DEP_Bl_Res_cb_unique_genes,] -->
+<!-- pcaData <- PCAtools::pca(assay(sig_dds_Res_ss), metadata = colData(sig_dds_Res_ss)) -->
+
+<!-- # Set colors -->
+<!-- color_vector <- -->
+<!--   c( -->
+<!--     'C' = 'black', -->
+<!--     'CEv3' = 'red', -->
+<!--     'E4' = 'deepskyblue4', -->
+<!--     'E5' = 'turquoise3', -->
+<!--     'G1' = 'purple4', -->
+<!--     'G5' = 'mediumorchid', -->
+<!--     'G8' = 'deeppink', -->
+<!--     'G12' = 'pink2' -->
+<!--   ) -->
+
+
+<!-- # PCA 1 -->
+<!-- p1 <- biplot(pcaData, x = "PC1", y = "PC2", -->
+<!--        lab = NULL , -->
+<!--        colby = "cell_line_abbr", -->
+<!--        colLegendTitle="Model", -->
+<!--        colkey= color_vector, -->
+<!--        shape = "serum", -->
+<!--        shapeLegendTitle="Serum", -->
+<!--        legendPosition = 'right' ) -->
+<!-- p1   -->
+<!-- # save graph as PDF -->
+<!-- ggsave( -->
+<!--   filename = paste0(graph_dir_pca,"pca_","bl_Res_all","cell_line",".pdf"), -->
+<!--   plot = p1 -->
+<!--   ) -->
+
+
+<!-- ``` -->
+
+
+# Baseline Signatures
+Setup
+```{r}
+# Clean environment
+rm(list = ls())
+gc()
+
+# Import setup workspace
+load(paste0("/Data/Input/Figures/setup_workspace.RData"))
+```
+
+Directories
+```{r}
+fig.label <- paste0("Baseline_signatures")
+figures_dir <- paste0(Data,"Figures/",fig.label,"/")
+dir.create(figures_dir)
+
+```
+
+## Signature import (Unique)
+```{r}
+# BL_sig
+BL_sigs_df <- read.csv(paste0(Data,"Figures/","Baseline_kinase_upset/","All_baseline_kinase_sig.csv"), row.names = 1, na.strings = c("","NA"))
+
+# Pivot
+df_long <- BL_sigs_df %>%
+  pivot_longer(cols = everything(), values_to = "gene")
+
+# Remove NA
+BL_sig <- subset(df_long,!df_long$gene=="")
+
+# # Remove OL sig
+BL_sig <- subset(BL_sig,BL_sig$name!="OL_BL_sig")
+
+# Remove hEGFR
+BL_sig <- subset(BL_sig,!BL_sig$gene=="hEGFR")
+
+# Remove text
+BL_sig$name <- gsub("_BL_sig","",BL_sig$name)
+```
+
+
+### Protein fs
+#### Fig.4A
+```{r}
+# Import Protein vsd
+DEP_Bl_Res_fs <- readRDS(tail(grep("DEP_Bl_Res_fs.rds",list.files(paste0(Data,"Output/MIB-BL/DEP_Bl_Res_fs"), recursive = T, full.names = T), value = T),1))
+DEP_Bl_Res_ss <- readRDS(tail(grep("DEP_Bl_Res_ss.rds",list.files(paste0(Data,"Output/MIB-BL/DEP_Bl_Res_ss"), recursive = T, full.names = T), value = T),1))
+
+# # Import mRNA vsd
+# DEP_Bl_Res_fs <- readRDS(tail(grep("bl_Res_fs_mv_.rds",list.files(paste0(Data,"Output/MIB-BL/DEP_EDA_subset/bl_Res_fs"), recursive = T, full.names = T), value = T),1))
+# DEP_Bl_Res_ss <- readRDS(tail(grep("bl_Res_ss_mv_.rds",list.files(paste0(Data,"Output/MIB-BL/DEP_EDA_subset/bl_Res_ss"), recursive = T, full.names = T), value = T),1))
+# 
+
+# Combined full and starved Protein
+DEP_Bl_Res_all <- cbind(DEP_Bl_Res_fs,DEP_Bl_Res_ss)
+
+# Already log2 transformed
+vsd <- DEP_Bl_Res_fs
+
+# Subset dds to contain genes in sig
+vsd_sig <-vsd[row.names(vsd) %in% BL_sig$gene,]
+
+# Divide by mean of CEv3
+CEv3_samples <- row.names(subset(colData(vsd_sig),colData(vsd_sig)$cell_line_abbr=="CEv3"))
+
+# Get mean of CEv3
+vsd_CEv3 <- vsd_sig[,colnames(vsd_sig) %in% CEv3_samples]
+CEv3_RowMean <- data.frame(rowMeans(assay(vsd_CEv3)[,colnames(vsd_CEv3) %in% CEv3_samples]))
+
+# Check 
+row.names(assay(vsd_sig))==row.names(CEv3_RowMean)
+
+# Calculate Normalized values
+vsd_sig_norm <- vsd_sig
+assay(vsd_sig_norm) <- sweep(assay(vsd_sig),1,CEv3_RowMean[,1])
+
+# Remove CEv3 samples
+vsd_sig_norm <- vsd_sig_norm[,!(colnames(vsd_sig_norm) %in% CEv3_samples)]
+
+# Heatmap_GOI_df_ls
+heatmap_goi <- data.frame(BL_sig)
+heatmap_goi$name <- as.factor(heatmap_goi$name)
+row.names(heatmap_goi) <- heatmap_goi$gene
+
+# Extract matrix values
+mat_list <- as.matrix(assay(vsd_sig_norm))
+
+# Heatmap annotation labels
+annotation_col <- HeatmapAnnotation(df = data.frame(Model = factor(vsd_sig_norm@colData$cell_line_abbr,
+                                                    # Set legend order
+                                                    levels= c("E4","E5","G1","G5","G8","G12")),
+                                    Serum = vsd_sig_norm@colData$serum),
+  col = list(Model =
+  c(
+    'E4' = 'deepskyblue4',
+    'E5' = 'turquoise3',
+    'G1' = 'purple4',
+    'G5' = 'mediumorchid',
+    'G8' = 'deeppink',
+    'G12' = 'pink2'
+    ),
+  Serum =
+    c("full"='firebrick',
+      "starve"='royalblue'
+      )
+  ))
+
+# Generate Heatmap
+Heatmap <- ComplexHeatmap::Heatmap(
+  t(scale(t(mat_list))),
+  top_annotation = annotation_col,
+  name = " ",
+  column_split = vsd_sig_norm@colData$cell_line_abbr,
+  column_title = "Protein FS",
+  row_split = heatmap_goi[row.names(mat_list),]["name"] ,
+  row_gap = unit(1, "mm"),
+  show_column_names = F,
+  show_row_names = T,
+  row_names_gp = gpar(fontsize = 8),
+  row_title_gp = gpar(fontsize = 8),
+  width = ncol(mat_list)*unit(5, "mm"), 
+  height = nrow(mat_list)*unit(2.5, "mm")
+  )
+
+draw(Heatmap)
+
+# Get height and width of heatmap for pdf
+width = convertX(ComplexHeatmap:::width(draw(Heatmap)), "inch", valueOnly = TRUE)
+height = convertY(ComplexHeatmap:::height(draw(Heatmap)), "inch", valueOnly = TRUE)
+
+pdf(file=paste0(figures_dir, "Protein_fs_sig", ".pdf"), width = width+(0.01*width), height = height+(0.01*height))
+draw(Heatmap)
+dev.off()
+
+```
+
+### Protein ss
+#### Fig.4B
+```{r}
+# Import Protein vsd
+DEP_Bl_Res_fs <- readRDS(tail(grep("DEP_Bl_Res_fs.rds",list.files(paste0(Data,"Output/MIB-BL/DEP_Bl_Res_fs"), recursive = T, full.names = T), value = T),1))
+DEP_Bl_Res_ss <- readRDS(tail(grep("DEP_Bl_Res_ss.rds",list.files(paste0(Data,"Output/MIB-BL/DEP_Bl_Res_ss"), recursive = T, full.names = T), value = T),1))
+
+# DEP_Bl_Res_fs <- readRDS(tail(grep("bl_Res_fs_mv_.rds",list.files(paste0(Data,"Output/MIB-BL/DEP_EDA_subset/bl_Res_fs"), recursive = T, full.names = T), value = T),1))
+# DEP_Bl_Res_ss <- readRDS(tail(grep("bl_Res_ss_mv_.rds",list.files(paste0(Data,"Output/MIB-BL/DEP_EDA_subset/bl_Res_ss"), recursive = T, full.names = T), value = T),1))
+
+# Combined full and starved Protein
+DEP_Bl_Res_all <- cbind(DEP_Bl_Res_fs,DEP_Bl_Res_ss)
+
+# Already log2 transformed
+vsd <- DEP_Bl_Res_ss
+
+# Subset dds to contain genes in sig
+vsd_sig <-vsd[row.names(vsd) %in% BL_sig$gene,]
+
+# Divide by mean of CEv3
+CEv3_samples <- row.names(subset(colData(vsd_sig),colData(vsd_sig)$cell_line_abbr=="CEv3"))
+
+# Get mean of CEv3
+vsd_CEv3 <- vsd_sig[,colnames(vsd_sig) %in% CEv3_samples]
+CEv3_RowMean <- data.frame(rowMeans(assay(vsd_CEv3)[,colnames(vsd_CEv3) %in% CEv3_samples]))
+
+# Check 
+row.names(assay(vsd_sig))==row.names(CEv3_RowMean)
+
+# Calculate Normalized values
+vsd_sig_norm <- vsd_sig
+assay(vsd_sig_norm) <- sweep(assay(vsd_sig),1,CEv3_RowMean[,1])
+
+# Remove CEv3 samples
+vsd_sig_norm <- vsd_sig_norm[,!(colnames(vsd_sig_norm) %in% CEv3_samples)]
+
+# Heatmap_GOI_df_ls
+heatmap_goi <- data.frame(BL_sig)
+heatmap_goi$name <- as.factor(heatmap_goi$name)
+row.names(heatmap_goi) <- heatmap_goi$gene
+
+# Extract matrix values
+mat_list <- as.matrix(assay(vsd_sig_norm))
+
+# Heatmap annotation labels
+annotation_col <- HeatmapAnnotation(df = data.frame(Model = factor(vsd_sig_norm@colData$cell_line_abbr,
+                                                    # Set legend order
+                                                    levels= c("E4","E5","G1","G5","G8","G12")),
+                                    Serum = vsd_sig_norm@colData$serum),
+  col = list(Model =
+  c(
+    'E4' = 'deepskyblue4',
+    'E5' = 'turquoise3',
+    'G1' = 'purple4',
+    'G5' = 'mediumorchid',
+    'G8' = 'deeppink',
+    'G12' = 'pink2'
+    ),
+  Serum =
+    c("full"='firebrick',
+      "starve"='royalblue'
+      )
+  ))
+
+
+# Generate Heatmap
+Heatmap <- ComplexHeatmap::Heatmap(
+  t(scale(t(mat_list))),
+  top_annotation = annotation_col,
+  name = " ",
+  column_split = vsd_sig_norm@colData$cell_line_abbr,
+  column_title = "Protein SS",
+  row_split = heatmap_goi[row.names(mat_list),]["name"] ,
+  row_gap = unit(1, "mm"),
+  show_column_names = F,
+  show_row_names = T,
+  row_names_gp = gpar(fontsize = 8),
+  row_title_gp = gpar(fontsize = 8),
+  width = ncol(mat_list)*unit(5, "mm"), 
+  height = nrow(mat_list)*unit(2.5, "mm")
+  )
+
+draw(Heatmap)
+
+# Get height and width of heatmap for pdf
+width = convertX(ComplexHeatmap:::width(draw(Heatmap)), "inch", valueOnly = TRUE)
+height = convertY(ComplexHeatmap:::height(draw(Heatmap)), "inch", valueOnly = TRUE)
+
+pdf(file=paste0(figures_dir, "Protein_ss_sig", ".pdf"), width = width+(0.01*width), height = height+(0.01*height))
+draw(Heatmap)
+dev.off()
+
+```
+
+## Signature import (OL)
+```{r}
+# BL_sig
+BL_sigs_df <- read.csv(paste0(Data,"Figures/","Baseline_kinase_upset/","All_baseline_kinase_sig.csv"), row.names = 1, na.strings = c("","NA"))
+
+# Pivot
+df_long <- BL_sigs_df %>%
+  pivot_longer(cols = everything(), values_to = "gene")
+
+# Remove NA
+BL_sig <- subset(df_long,!df_long$gene=="")
+
+# Remove unique sig
+BL_sig <- subset(BL_sig,BL_sig$name=="OL_BL_sig")
+
+# Remove hEGFR
+BL_sig <- subset(BL_sig,!BL_sig$gene=="hEGFR")
+
+# Remove text
+BL_sig$name <- gsub("_BL_sig","",BL_sig$name)
+```
+### Protein fs
+#### Fig.4C
+```{r}
+# Import Protein vsd
+DEP_Bl_Res_fs <- readRDS(tail(grep("DEP_Bl_Res_fs.rds",list.files(paste0(Data,"Output/MIB-BL/DEP_Bl_Res_fs"), recursive = T, full.names = T), value = T),1))
+DEP_Bl_Res_ss <- readRDS(tail(grep("DEP_Bl_Res_ss.rds",list.files(paste0(Data,"Output/MIB-BL/DEP_Bl_Res_ss"), recursive = T, full.names = T), value = T),1))
+
+# # # Import mRNA vsd
+# # DEP_Bl_Res_fs <- readRDS(tail(grep("bl_Res_fs_mv_.rds",list.files(paste0(Data,"Output/MIB-BL/DEP_EDA_subset/bl_Res_fs"), recursive = T, full.names = T), value = T),1))
+# # DEP_Bl_Res_ss <- readRDS(tail(grep("bl_Res_ss_mv_.rds",list.files(paste0(Data,"Output/MIB-BL/DEP_EDA_subset/bl_Res_ss"), recursive = T, full.names = T), value = T),1))
+# # 
+# 
+# # Combined full and starved Protein
+# DEP_Bl_Res_all <- cbind(DEP_Bl_Res_fs,DEP_Bl_Res_ss)
+
+# Already log2 transformed
+vsd <- DEP_Bl_Res_fs
+
+# Subset dds to contain genes in sig
+vsd_sig <-vsd[row.names(vsd) %in% BL_sig$gene,]
+
+# Divide by mean of CEv3
+CEv3_samples <- row.names(subset(colData(vsd_sig),colData(vsd_sig)$cell_line_abbr=="CEv3"))
+
+# Get mean of CEv3
+vsd_CEv3 <- vsd_sig[,colnames(vsd_sig) %in% CEv3_samples]
+CEv3_RowMean <- data.frame(rowMeans(assay(vsd_CEv3)[,colnames(vsd_CEv3) %in% CEv3_samples]))
+
+# Check 
+row.names(assay(vsd_sig))==row.names(CEv3_RowMean)
+
+# Calculate Normalized values
+vsd_sig_norm <- vsd_sig
+assay(vsd_sig_norm) <- sweep(assay(vsd_sig),1,CEv3_RowMean[,1])
+
+# Clip values
+assay(vsd_sig_norm) <- pmax(pmin(assay(vsd_sig_norm),4),-4)
+
+# Remove CEv3 samples
+vsd_sig_norm <- vsd_sig_norm[,!(colnames(vsd_sig_norm) %in% CEv3_samples)]
+
+
+
+# Heatmap_GOI_df_ls
+heatmap_goi <- data.frame(BL_sig)
+heatmap_goi$name <- as.factor(heatmap_goi$name)
+row.names(heatmap_goi) <- heatmap_goi$gene
+
+# Extract matrix values
+mat_list <- as.matrix(assay(vsd_sig_norm))
+
+# Heatmap annotation labels
+annotation_col <- HeatmapAnnotation(df = data.frame(Model = factor(vsd_sig_norm@colData$cell_line_abbr,
+                                                    # Set legend order
+                                                    levels= c("E4","E5","G1","G5","G8","G12")),
+                                    Serum = vsd_sig_norm@colData$serum),
+  col = list(Model =
+  c(
+    'E4' = 'deepskyblue4',
+    'E5' = 'turquoise3',
+    'G1' = 'purple4',
+    'G5' = 'mediumorchid',
+    'G8' = 'deeppink',
+    'G12' = 'pink2'
+    ),
+  Serum =
+    c("full"='firebrick',
+      "starve"='royalblue'
+      )
+  ))
+
+# Generate Heatmap
+Heatmap <- ComplexHeatmap::Heatmap(
+  mat_list,
+  top_annotation = annotation_col,
+  name = " ",
+  column_split = vsd_sig_norm@colData$cell_line_abbr,
+  column_title = "Protein FS",
+  row_split = heatmap_goi[row.names(mat_list),]["name"] ,
+  row_gap = unit(1, "mm"),
+  show_column_names = F,
+  show_row_names = T,
+  row_names_gp = gpar(fontsize = 8),
+  row_title_gp = gpar(fontsize = 8),
+  width = ncol(mat_list)*unit(5, "mm"), 
+  height = nrow(mat_list)*unit(2.5, "mm")
+  )
+
+draw(Heatmap)
+
+# Get height and width of heatmap for pdf
+width = convertX(ComplexHeatmap:::width(draw(Heatmap)), "inch", valueOnly = TRUE)
+height = convertY(ComplexHeatmap:::height(draw(Heatmap)), "inch", valueOnly = TRUE)
+
+pdf(file=paste0(figures_dir, "OL_Protein_fs_sig", ".pdf"), width = width+(0.01*width), height = height+(0.01*height))
+draw(Heatmap)
+dev.off()
+
+```
+
+### Protein ss
+#### Fig.4D
+```{r}
+# Import Protein vsd
+DEP_Bl_Res_fs <- readRDS(tail(grep("DEP_Bl_Res_fs.rds",list.files(paste0(Data,"Output/MIB-BL/DEP_Bl_Res_fs"), recursive = T, full.names = T), value = T),1))
+DEP_Bl_Res_ss <- readRDS(tail(grep("DEP_Bl_Res_ss.rds",list.files(paste0(Data,"Output/MIB-BL/DEP_Bl_Res_ss"), recursive = T, full.names = T), value = T),1))
+
+# DEP_Bl_Res_fs <- readRDS(tail(grep("bl_Res_fs_mv_.rds",list.files(paste0(Data,"Output/MIB-BL/DEP_EDA_subset/bl_Res_fs"), recursive = T, full.names = T), value = T),1))
+# DEP_Bl_Res_ss <- readRDS(tail(grep("bl_Res_ss_mv_.rds",list.files(paste0(Data,"Output/MIB-BL/DEP_EDA_subset/bl_Res_ss"), recursive = T, full.names = T), value = T),1))
+
+# Combined full and starved Protein
+DEP_Bl_Res_all <- cbind(DEP_Bl_Res_fs,DEP_Bl_Res_ss)
+
+# Already log2 transformed
+vsd <- DEP_Bl_Res_ss
+
+# Subset dds to contain genes in sig
+vsd_sig <-vsd[row.names(vsd) %in% BL_sig$gene,]
+
+# Divide by mean of CEv3
+CEv3_samples <- row.names(subset(colData(vsd_sig),colData(vsd_sig)$cell_line_abbr=="CEv3"))
+
+# Get mean of CEv3
+vsd_CEv3 <- vsd_sig[,colnames(vsd_sig) %in% CEv3_samples]
+CEv3_RowMean <- data.frame(rowMeans(assay(vsd_CEv3)[,colnames(vsd_CEv3) %in% CEv3_samples]))
+
+# Check 
+row.names(assay(vsd_sig))==row.names(CEv3_RowMean)
+
+# Calculate Normalized values
+vsd_sig_norm <- vsd_sig
+assay(vsd_sig_norm) <- sweep(assay(vsd_sig),1,CEv3_RowMean[,1])
+
+# Clip values
+assay(vsd_sig_norm) <- pmax(pmin(assay(vsd_sig_norm),4),-4)
+
+# Remove CEv3 samples
+vsd_sig_norm <- vsd_sig_norm[,!(colnames(vsd_sig_norm) %in% CEv3_samples)]
+
+# Heatmap_GOI_df_ls
+heatmap_goi <- data.frame(BL_sig)
+heatmap_goi$name <- as.factor(heatmap_goi$name)
+row.names(heatmap_goi) <- heatmap_goi$gene
+
+# Extract matrix values
+mat_list <- as.matrix(assay(vsd_sig_norm))
+
+# Heatmap annotation labels
+annotation_col <- HeatmapAnnotation(df = data.frame(Model = factor(vsd_sig_norm@colData$cell_line_abbr,
+                                                    # Set legend order
+                                                    levels= c("E4","E5","G1","G5","G8","G12")),
+                                    Serum = vsd_sig_norm@colData$serum),
+  col = list(Model =
+  c(
+    'E4' = 'deepskyblue4',
+    'E5' = 'turquoise3',
+    'G1' = 'purple4',
+    'G5' = 'mediumorchid',
+    'G8' = 'deeppink',
+    'G12' = 'pink2'
+    ),
+  Serum =
+    c("full"='firebrick',
+      "starve"='royalblue'
+      )
+  ))
+
+
+# Generate Heatmap
+Heatmap <- ComplexHeatmap::Heatmap(
+  mat_list,
+  top_annotation = annotation_col,
+  name = " ",
+  column_split = vsd_sig_norm@colData$cell_line_abbr,
+  column_title = "Protein SS",
+  row_split = heatmap_goi[row.names(mat_list),]["name"] ,
+  row_gap = unit(1, "mm"),
+  show_column_names = F,
+  show_row_names = T,
+  row_names_gp = gpar(fontsize = 8),
+  row_title_gp = gpar(fontsize = 8),
+  width = ncol(mat_list)*unit(5, "mm"), 
+  height = nrow(mat_list)*unit(2.5, "mm")
+  )
+
+draw(Heatmap)
+
+# Get height and width of heatmap for pdf
+width = convertX(ComplexHeatmap:::width(draw(Heatmap)), "inch", valueOnly = TRUE)
+height = convertY(ComplexHeatmap:::height(draw(Heatmap)), "inch", valueOnly = TRUE)
+
+pdf(file=paste0(figures_dir, "OL_Protein_ss_sig", ".pdf"), width = width+(0.01*width), height = height+(0.01*height))
+draw(Heatmap)
+dev.off()
+
+```
+
+
+# Baseline_sig_corr
+EGFR TKI resistance signature (in vitro models)
+
+## Signature import
+```{r}
+# BL_sig
+BL_sigs_df <- read.csv(paste0(Data,"Figures/","Baseline_kinase_upset/","All_baseline_kinase_sig.csv"), row.names = 1, na.strings = c("","NA"))
+
+# Pivot
+df_long <- BL_sigs_df %>%
+  pivot_longer(cols = everything(), values_to = "gene")
+
+# Remove NA
+BL_sig <- subset(df_long,!df_long$gene=="")
+
+# Remove hEGFR
+BL_sig <- subset(BL_sig,!BL_sig$gene=="hEGFR")
+
+# Remove text
+BL_sig$name <- gsub("_BL_sig","",BL_sig$name)
+```
+
+## fs
+### Import fs DE res
+```{r}
+
+fig.label <- paste0("Baseline_sig_corr")
+figures_dir <- paste0(Data,"Figures/",fig.label,"/")
+dir.create(figures_dir)
+
+# limma results direct
+output_dir_res <- paste0(Data,"Output/MIB-BL/DEP_Bl_Res_fs/","Limma_res/")
+
+# Summarize of limma comparisions
+comps_limma <- read.csv(paste0(Data,"Output/MIB-BL/DEP_Bl_Res_fs/","comps_all.csv"), row.names = 1)
+
+# import limma res
+subset_limmaRes <- list()
+for (i in seq_along(row.names(comps_limma))){
+  subset_limmaRes[[comps_limma$comp[i]]] <-
+  read.csv(paste0(output_dir_res,"comp_",i,"_",comps_limma[i,5],".csv"), row.names = 1)
+}
+
+# Extract comps_limma of interest
+coi_limma <- comps_limma[comps_limma$comp_denom %in% c("CEv3.full"),]$comp
+comp_list_oi_limma <- subset_limmaRes[names(subset_limmaRes) %in% coi_limma]
+
+# DESEQ2 results direct
+output_dir_res <- paste0(Data,"Output/RNA/dds_EDA_subset/bl_Res_fs/","DE2_res/")
+
+# Summarize of DESEQ2 comparisions
+comps_DE2 <- read.csv(paste0(Data,"Output/RNA/dds_EDA_subset/bl_Res_fs/","comps_all.csv"), row.names = 1)
+
+# import DE2 res
+subset_DE2Res <- list()
+for (i in seq_along(comps_DE2$comp_name)){
+  subset_DE2Res[[comps_DE2$comp_name[i]]] <-
+  read.csv(paste0(output_dir_res,"comp_",i,"_",comps_DE2$comp_name[i],".csv"), row.names = 1)
+}
+
+# Extract comps_DE2 of interest
+coi_DE2 <- comps_DE2[comps_DE2$comp_denom %in% c("full_CEv3_NA_0"),]$comp_name
+comp_list_oi_DE2 <- subset_DE2Res[names(subset_DE2Res) %in% coi_DE2]
+
+# Comps combined
+comps_df_limma <- comps_limma[comps_limma$comp_denom %in% c("CEv3.full"),]
+colnames(comps_df_limma) <- paste(colnames(comps_df_limma),"protein",sep = "_")
+comps_df_DE2 <- comps_DE2[comps_DE2$comp_denom %in% c("full_CEv3_NA_0"),]
+colnames(comps_df_DE2) <- paste(colnames(comps_df_DE2),"mRNA",sep = "_")
+
+# Cbind
+comps_combined <- cbind(comps_df_limma,comps_df_DE2)
+comps_combined
+
+# Remove genes not in signature
+
+# Remove protein genes not in signature
+comp_list_oi_limma_filt <- lapply(comp_list_oi_limma, function(x) subset(x,row.names(x) %in% c(BL_sig$gene)))
+
+# Remove RNA genes not in signature
+comp_list_oi_DE2_filt <- lapply(comp_list_oi_DE2, function(x) subset(x,row.names(x) %in% c(BL_sig$gene)))
+
+
+
+```
+
+### Corr plots FS
+### S.6A-F
+#### 1
+```{r}
+# Change for each
+corr_comp <- comps_combined[1,]
+
+# Import L2FC for mRNA and MIBS
+RNA_LFC <- data.frame(comp_list_oi_DE2_filt[corr_comp[,"comp_name_mRNA"]])
+MIBs_LFC <- data.frame(comp_list_oi_limma_filt[corr_comp[,"comp_protein"]])
+
+# row.names to column
+RNA_LFC$genes <- row.names(RNA_LFC)
+MIBs_LFC$genes <- row.names(MIBs_LFC)
+
+# Join RNA and MIBs
+proteo.transcriptomic_LFC <- left_join(RNA_LFC,MIBs_LFC , by= c("genes"="genes"))
+
+# Generate labels
+proteo.transcriptomic_LFC$mRNA_sig <- ifelse(proteo.transcriptomic_LFC[[grep("padj",colnames(proteo.transcriptomic_LFC),value = T)]] < 0.05, "Yes", "No")
+proteo.transcriptomic_LFC$MIB_sig <- ifelse(proteo.transcriptomic_LFC[[grep("adj.P.Val",colnames(proteo.transcriptomic_LFC),value = T)]]< 0.05, "Yes", "No")
+proteo.transcriptomic_LFC$mRNA_dir <- ifelse(proteo.transcriptomic_LFC[[grep("log2FoldChange",colnames(proteo.transcriptomic_LFC),value = T)]] < 0, "Down", "Up")
+proteo.transcriptomic_LFC$MIB_dir <- ifelse(proteo.transcriptomic_LFC[[grep("logFC",colnames(proteo.transcriptomic_LFC),value = T)]] < 0, "Down", "Up")
+
+# Generate labels
+proteo.transcriptomic_LFC$corr <-
+    ifelse((proteo.transcriptomic_LFC$MIB_sig == "Yes" &
+              proteo.transcriptomic_LFC$mRNA_sig == "Yes"),
+           "Both",
+           ifelse((proteo.transcriptomic_LFC$MIB_sig == "Yes" &
+                     proteo.transcriptomic_LFC$mRNA_sig == "No"),
+                  "MIBs",
+                  ifelse((proteo.transcriptomic_LFC$MIB_sig == "No" &
+                            proteo.transcriptomic_LFC$mRNA_sig == "Yes"),
+                         "mRNA",
+                         "Neither"
+                  )
+           )
+    )
+
+# Label Neither
+proteo.transcriptomic_LFC$corr[is.na(proteo.transcriptomic_LFC$corr)] <- "Neither"
+
+# Convert to factors
+proteo.transcriptomic_LFC$mRNA_sig <- as.factor(proteo.transcriptomic_LFC$mRNA_sig)
+proteo.transcriptomic_LFC$MIB_sig <- as.factor(proteo.transcriptomic_LFC$MIB_sig)
+proteo.transcriptomic_LFC$mRNA_dir <- as.factor(proteo.transcriptomic_LFC$mRNA_dir)
+proteo.transcriptomic_LFC$MIB_dir <- as.factor(proteo.transcriptomic_LFC$MIB_dir)
+proteo.transcriptomic_LFC$corr <- as.factor(proteo.transcriptomic_LFC$corr)
+
+# Rename Columns
+names(proteo.transcriptomic_LFC)[grep("logFC",colnames(proteo.transcriptomic_LFC))] <- "MIBs"
+names(proteo.transcriptomic_LFC)[grep("log2FoldChange",colnames(proteo.transcriptomic_LFC))] <- "RNA"
+
+# Calculate correlation
+# Perform correlation test
+corr_test <- cor.test(proteo.transcriptomic_LFC$MIBs, proteo.transcriptomic_LFC$RNA, 
+                      method = "pearson", use = "complete.obs")
+
+# Extract values
+# Correlation coefficient
+corr_val <- corr_test$estimate
+# P-value
+p_val    <- corr_test$p.value     
+
+# Calculate annotation positions
+x_pos <- max(proteo.transcriptomic_LFC$MIBs, na.rm = TRUE)*(.60)
+y_pos <- min(proteo.transcriptomic_LFC$RNA, na.rm = TRUE)*(.95)
+
+# Generate Graph
+corr_plot <- ggplot(proteo.transcriptomic_LFC, aes(x = MIBs , y = RNA)) +
+    geom_point(aes(color = corr), size = 3) +
+    geom_label_repel(
+      aes(
+        label = ifelse((MIB_sig == "Yes" | mRNA_sig == "Yes"),
+          as.character(genes),
+          ''
+        )
+      ),
+      box.padding   = 0.35,
+      point.padding = 0.5,
+      segment.color = 'grey50',
+      max.overlaps = 30
+    ) +
+    labs(x = 'Protein (Log2 FC)', y ='mRNA (Log2 FC)' ) +
+    ggtitle(paste0(corr_comp["comp_num_protein"])) +
+    guides(fill = guide_legend(reverse = TRUE)) +
+    scale_color_manual(
+      "Significant",
+      values = c(
+        "Both" = "#984EA3",
+        "MIBs" = "#E41A1C",
+        "mRNA" = "#377EB8",
+        "Neither" = "#4DAF4A"
+      )
+    ) +
+  labs(caption = paste0("Pearson r = ", round(corr_val, 2), ", p = ", signif(p_val, 3))) +
+    theme_bw() +
+    theme(legend.position = 'right',
+          plot.caption = element_text(size = 10)) +
+    theme(panel.grid.minor = element_blank())
+
+corr_plot
+
+# Save graph
+ggsave(paste0(figures_dir,corr_comp["comp_num_protein"],"_correlation_scatter_plot.pdf"),
+       plot = corr_plot,
+       dpi = 300)
+```
+
+#### 2
+```{r}
+# Change for each
+corr_comp <- comps_combined[2,]
+
+# Import L2FC for mRNA and MIBS
+RNA_LFC <- data.frame(comp_list_oi_DE2_filt[corr_comp[,"comp_name_mRNA"]])
+MIBs_LFC <- data.frame(comp_list_oi_limma_filt[corr_comp[,"comp_protein"]])
+
+# row.names to column
+RNA_LFC$genes <- row.names(RNA_LFC)
+MIBs_LFC$genes <- row.names(MIBs_LFC)
+
+# Join RNA and MIBs
+proteo.transcriptomic_LFC <- left_join(RNA_LFC,MIBs_LFC , by= c("genes"="genes"))
+
+# Generate labels
+proteo.transcriptomic_LFC$mRNA_sig <- ifelse(proteo.transcriptomic_LFC[[grep("padj",colnames(proteo.transcriptomic_LFC),value = T)]] < 0.05, "Yes", "No")
+proteo.transcriptomic_LFC$MIB_sig <- ifelse(proteo.transcriptomic_LFC[[grep("adj.P.Val",colnames(proteo.transcriptomic_LFC),value = T)]]< 0.05, "Yes", "No")
+proteo.transcriptomic_LFC$mRNA_dir <- ifelse(proteo.transcriptomic_LFC[[grep("log2FoldChange",colnames(proteo.transcriptomic_LFC),value = T)]] < 0, "Down", "Up")
+proteo.transcriptomic_LFC$MIB_dir <- ifelse(proteo.transcriptomic_LFC[[grep("logFC",colnames(proteo.transcriptomic_LFC),value = T)]] < 0, "Down", "Up")
+
+# Generate labels
+proteo.transcriptomic_LFC$corr <-
+    ifelse((proteo.transcriptomic_LFC$MIB_sig == "Yes" &
+              proteo.transcriptomic_LFC$mRNA_sig == "Yes"),
+           "Both",
+           ifelse((proteo.transcriptomic_LFC$MIB_sig == "Yes" &
+                     proteo.transcriptomic_LFC$mRNA_sig == "No"),
+                  "MIBs",
+                  ifelse((proteo.transcriptomic_LFC$MIB_sig == "No" &
+                            proteo.transcriptomic_LFC$mRNA_sig == "Yes"),
+                         "mRNA",
+                         "Neither"
+                  )
+           )
+    )
+
+# Label Neither
+proteo.transcriptomic_LFC$corr[is.na(proteo.transcriptomic_LFC$corr)] <- "Neither"
+
+# # Label kinase receptors
+# proteo.transcriptomic_LFC$Receptor <-ifelse(proteo.transcriptomic_LFC$gene %in% Heatmap_GOI_df$gene_symbol, "Yes","No")
+
+# Convert to factors
+proteo.transcriptomic_LFC$mRNA_sig <- as.factor(proteo.transcriptomic_LFC$mRNA_sig)
+proteo.transcriptomic_LFC$MIB_sig <- as.factor(proteo.transcriptomic_LFC$MIB_sig)
+proteo.transcriptomic_LFC$mRNA_dir <- as.factor(proteo.transcriptomic_LFC$mRNA_dir)
+proteo.transcriptomic_LFC$MIB_dir <- as.factor(proteo.transcriptomic_LFC$MIB_dir)
+proteo.transcriptomic_LFC$corr <- as.factor(proteo.transcriptomic_LFC$corr)
+
+# Rename Columns
+names(proteo.transcriptomic_LFC)[grep("logFC",colnames(proteo.transcriptomic_LFC))] <- "MIBs"
+names(proteo.transcriptomic_LFC)[grep("log2FoldChange",colnames(proteo.transcriptomic_LFC))] <- "RNA"
+
+# Calculate correlation
+# Perform correlation test
+corr_test <- cor.test(proteo.transcriptomic_LFC$MIBs, proteo.transcriptomic_LFC$RNA, 
+                      method = "pearson", use = "complete.obs")
+
+# Extract values
+# Correlation coefficient
+corr_val <- corr_test$estimate
+# P-value
+p_val    <- corr_test$p.value     
+
+# Calculate annotation positions
+x_pos <- max(proteo.transcriptomic_LFC$MIBs, na.rm = TRUE)*(.60)
+y_pos <- min(proteo.transcriptomic_LFC$RNA, na.rm = TRUE)*(.95)
+
+# Generate Graph
+corr_plot <- ggplot(proteo.transcriptomic_LFC, aes(x = MIBs , y = RNA)) +
+    geom_point(aes(color = corr), size = 3) +
+    geom_label_repel(
+      aes(
+        label = ifelse((MIB_sig == "Yes" | mRNA_sig == "Yes"),
+          as.character(genes),
+          ''
+        )
+      ),
+      box.padding   = 0.35,
+      point.padding = 0.5,
+      segment.color = 'grey50',
+      max.overlaps = 30
+    ) +
+    labs(x = 'Protein (Log2 FC)', y ='mRNA (Log2 FC)' ) +
+    ggtitle(paste0(corr_comp["comp_num_protein"])) +
+    guides(fill = guide_legend(reverse = TRUE)) +
+    scale_color_manual(
+      "Significant",
+      values = c(
+        "Both" = "#984EA3",
+        "MIBs" = "#E41A1C",
+        "mRNA" = "#377EB8",
+        "Neither" = "#4DAF4A"
+      )
+    ) +
+  labs(caption = paste0("Pearson r = ", round(corr_val, 2), ", p = ", signif(p_val, 3))) +
+    theme_bw() +
+    theme(legend.position = 'right',
+          plot.caption = element_text(size = 10)) +
+    theme(panel.grid.minor = element_blank())
+
+corr_plot
+
+# Save graph
+ggsave(paste0(figures_dir,corr_comp["comp_num_protein"],"_correlation_scatter_plot.pdf"),
+       plot = corr_plot,
+       dpi = 300)
+```
+
+#### 3
+```{r}
+# Change for each
+corr_comp <- comps_combined[3,]
+
+# Import L2FC for mRNA and MIBS
+RNA_LFC <- data.frame(comp_list_oi_DE2_filt[corr_comp[,"comp_name_mRNA"]])
+MIBs_LFC <- data.frame(comp_list_oi_limma_filt[corr_comp[,"comp_protein"]])
+
+# row.names to column
+RNA_LFC$genes <- row.names(RNA_LFC)
+MIBs_LFC$genes <- row.names(MIBs_LFC)
+
+# Join RNA and MIBs
+proteo.transcriptomic_LFC <- left_join(RNA_LFC,MIBs_LFC , by= c("genes"="genes"))
+
+# Generate labels
+proteo.transcriptomic_LFC$mRNA_sig <- ifelse(proteo.transcriptomic_LFC[[grep("padj",colnames(proteo.transcriptomic_LFC),value = T)]] < 0.05, "Yes", "No")
+proteo.transcriptomic_LFC$MIB_sig <- ifelse(proteo.transcriptomic_LFC[[grep("adj.P.Val",colnames(proteo.transcriptomic_LFC),value = T)]]< 0.05, "Yes", "No")
+proteo.transcriptomic_LFC$mRNA_dir <- ifelse(proteo.transcriptomic_LFC[[grep("log2FoldChange",colnames(proteo.transcriptomic_LFC),value = T)]] < 0, "Down", "Up")
+proteo.transcriptomic_LFC$MIB_dir <- ifelse(proteo.transcriptomic_LFC[[grep("logFC",colnames(proteo.transcriptomic_LFC),value = T)]] < 0, "Down", "Up")
+
+# Generate labels
+proteo.transcriptomic_LFC$corr <-
+    ifelse((proteo.transcriptomic_LFC$MIB_sig == "Yes" &
+              proteo.transcriptomic_LFC$mRNA_sig == "Yes"),
+           "Both",
+           ifelse((proteo.transcriptomic_LFC$MIB_sig == "Yes" &
+                     proteo.transcriptomic_LFC$mRNA_sig == "No"),
+                  "MIBs",
+                  ifelse((proteo.transcriptomic_LFC$MIB_sig == "No" &
+                            proteo.transcriptomic_LFC$mRNA_sig == "Yes"),
+                         "mRNA",
+                         "Neither"
+                  )
+           )
+    )
+
+# Label Neither
+proteo.transcriptomic_LFC$corr[is.na(proteo.transcriptomic_LFC$corr)] <- "Neither"
+
+# # Label kinase receptors
+# proteo.transcriptomic_LFC$Receptor <-ifelse(proteo.transcriptomic_LFC$gene %in% Heatmap_GOI_df$gene_symbol, "Yes","No")
+
+# Convert to factors
+proteo.transcriptomic_LFC$mRNA_sig <- as.factor(proteo.transcriptomic_LFC$mRNA_sig)
+proteo.transcriptomic_LFC$MIB_sig <- as.factor(proteo.transcriptomic_LFC$MIB_sig)
+proteo.transcriptomic_LFC$mRNA_dir <- as.factor(proteo.transcriptomic_LFC$mRNA_dir)
+proteo.transcriptomic_LFC$MIB_dir <- as.factor(proteo.transcriptomic_LFC$MIB_dir)
+proteo.transcriptomic_LFC$corr <- as.factor(proteo.transcriptomic_LFC$corr)
+
+# Rename Columns
+names(proteo.transcriptomic_LFC)[grep("logFC",colnames(proteo.transcriptomic_LFC))] <- "MIBs"
+names(proteo.transcriptomic_LFC)[grep("log2FoldChange",colnames(proteo.transcriptomic_LFC))] <- "RNA"
+
+# Calculate correlation
+# Perform correlation test
+corr_test <- cor.test(proteo.transcriptomic_LFC$MIBs, proteo.transcriptomic_LFC$RNA, 
+                      method = "pearson", use = "complete.obs")
+
+# Extract values
+# Correlation coefficient
+corr_val <- corr_test$estimate
+# P-value
+p_val    <- corr_test$p.value     
+
+# Calculate annotation positions
+x_pos <- max(proteo.transcriptomic_LFC$MIBs, na.rm = TRUE)*(.60)
+y_pos <- min(proteo.transcriptomic_LFC$RNA, na.rm = TRUE)*(.95)
+
+# Generate Graph
+corr_plot <- ggplot(proteo.transcriptomic_LFC, aes(x = MIBs , y = RNA)) +
+    geom_point(aes(color = corr), size = 3) +
+    geom_label_repel(
+      aes(
+        label = ifelse((MIB_sig == "Yes" | mRNA_sig == "Yes"),
+          as.character(genes),
+          ''
+        )
+      ),
+      box.padding   = 0.35,
+      point.padding = 0.5,
+      segment.color = 'grey50',
+      max.overlaps = 30
+    ) +
+    labs(x = 'Protein (Log2 FC)', y ='mRNA (Log2 FC)' ) +
+    ggtitle(paste0(corr_comp["comp_num_protein"])) +
+    guides(fill = guide_legend(reverse = TRUE)) +
+    scale_color_manual(
+      "Significant",
+      values = c(
+        "Both" = "#984EA3",
+        "MIBs" = "#E41A1C",
+        "mRNA" = "#377EB8",
+        "Neither" = "#4DAF4A"
+      )
+    ) +
+  labs(caption = paste0("Pearson r = ", round(corr_val, 2), ", p = ", signif(p_val, 3))) +
+  theme_bw() +
+theme(legend.position = 'right',
+          plot.caption = element_text(size = 10)) +
+    theme(panel.grid.minor = element_blank())
+
+corr_plot
+
+# Save graph
+ggsave(paste0(figures_dir,corr_comp["comp_num_protein"],"_correlation_scatter_plot.pdf"),
+       plot = corr_plot,
+       dpi = 300)
+```
+
+#### 4
+```{r}
+# Change for each
+corr_comp <- comps_combined[4,]
+
+# Import L2FC for mRNA and MIBS
+RNA_LFC <- data.frame(comp_list_oi_DE2_filt[corr_comp[,"comp_name_mRNA"]])
+MIBs_LFC <- data.frame(comp_list_oi_limma_filt[corr_comp[,"comp_protein"]])
+
+# row.names to column
+RNA_LFC$genes <- row.names(RNA_LFC)
+MIBs_LFC$genes <- row.names(MIBs_LFC)
+
+# Join RNA and MIBs
+proteo.transcriptomic_LFC <- left_join(RNA_LFC,MIBs_LFC , by= c("genes"="genes"))
+
+# Generate labels
+proteo.transcriptomic_LFC$mRNA_sig <- ifelse(proteo.transcriptomic_LFC[[grep("padj",colnames(proteo.transcriptomic_LFC),value = T)]] < 0.05, "Yes", "No")
+proteo.transcriptomic_LFC$MIB_sig <- ifelse(proteo.transcriptomic_LFC[[grep("adj.P.Val",colnames(proteo.transcriptomic_LFC),value = T)]]< 0.05, "Yes", "No")
+proteo.transcriptomic_LFC$mRNA_dir <- ifelse(proteo.transcriptomic_LFC[[grep("log2FoldChange",colnames(proteo.transcriptomic_LFC),value = T)]] < 0, "Down", "Up")
+proteo.transcriptomic_LFC$MIB_dir <- ifelse(proteo.transcriptomic_LFC[[grep("logFC",colnames(proteo.transcriptomic_LFC),value = T)]] < 0, "Down", "Up")
+
+# Generate labels
+proteo.transcriptomic_LFC$corr <-
+    ifelse((proteo.transcriptomic_LFC$MIB_sig == "Yes" &
+              proteo.transcriptomic_LFC$mRNA_sig == "Yes"),
+           "Both",
+           ifelse((proteo.transcriptomic_LFC$MIB_sig == "Yes" &
+                     proteo.transcriptomic_LFC$mRNA_sig == "No"),
+                  "MIBs",
+                  ifelse((proteo.transcriptomic_LFC$MIB_sig == "No" &
+                            proteo.transcriptomic_LFC$mRNA_sig == "Yes"),
+                         "mRNA",
+                         "Neither"
+                  )
+           )
+    )
+
+# Label Neither
+proteo.transcriptomic_LFC$corr[is.na(proteo.transcriptomic_LFC$corr)] <- "Neither"
+
+# # Label kinase receptors
+# proteo.transcriptomic_LFC$Receptor <-ifelse(proteo.transcriptomic_LFC$gene %in% Heatmap_GOI_df$gene_symbol, "Yes","No")
+
+# Convert to factors
+proteo.transcriptomic_LFC$mRNA_sig <- as.factor(proteo.transcriptomic_LFC$mRNA_sig)
+proteo.transcriptomic_LFC$MIB_sig <- as.factor(proteo.transcriptomic_LFC$MIB_sig)
+proteo.transcriptomic_LFC$mRNA_dir <- as.factor(proteo.transcriptomic_LFC$mRNA_dir)
+proteo.transcriptomic_LFC$MIB_dir <- as.factor(proteo.transcriptomic_LFC$MIB_dir)
+proteo.transcriptomic_LFC$corr <- as.factor(proteo.transcriptomic_LFC$corr)
+
+# Rename Columns
+names(proteo.transcriptomic_LFC)[grep("logFC",colnames(proteo.transcriptomic_LFC))] <- "MIBs"
+names(proteo.transcriptomic_LFC)[grep("log2FoldChange",colnames(proteo.transcriptomic_LFC))] <- "RNA"
+
+# Calculate correlation
+# Perform correlation test
+corr_test <- cor.test(proteo.transcriptomic_LFC$MIBs, proteo.transcriptomic_LFC$RNA, 
+                      method = "pearson", use = "complete.obs")
+
+# Extract values
+# Correlation coefficient
+corr_val <- corr_test$estimate
+# P-value
+p_val    <- corr_test$p.value     
+
+# Calculate annotation positions
+x_pos <- max(proteo.transcriptomic_LFC$MIBs, na.rm = TRUE)*(.60)
+y_pos <- min(proteo.transcriptomic_LFC$RNA, na.rm = TRUE)*(.95)
+
+# Generate Graph
+corr_plot <- ggplot(proteo.transcriptomic_LFC, aes(x = MIBs , y = RNA)) +
+    geom_point(aes(color = corr), size = 3) +
+    geom_label_repel(
+      aes(
+        label = ifelse((MIB_sig == "Yes" | mRNA_sig == "Yes"),
+          as.character(genes),
+          ''
+        )
+      ),
+      box.padding   = 0.35,
+      point.padding = 0.5,
+      segment.color = 'grey50',
+      max.overlaps = 30
+    ) +
+    labs(x = 'Protein (Log2 FC)', y ='mRNA (Log2 FC)' ) +
+    ggtitle(paste0(corr_comp["comp_num_protein"])) +
+    guides(fill = guide_legend(reverse = TRUE)) +
+    scale_color_manual(
+      "Significant",
+      values = c(
+        "Both" = "#984EA3",
+        "MIBs" = "#E41A1C",
+        "mRNA" = "#377EB8",
+        "Neither" = "#4DAF4A"
+      )
+    ) +
+   labs(caption = paste0("Pearson r = ", round(corr_val, 2), ", p = ", signif(p_val, 3))) +
+    theme_bw() +
+    theme(legend.position = 'right',
+          plot.caption = element_text(size = 10)) +
+    theme(panel.grid.minor = element_blank())
+
+corr_plot
+
+# Save graph
+ggsave(paste0(figures_dir,corr_comp["comp_num_protein"],"_correlation_scatter_plot.pdf"),
+       plot = corr_plot,
+       dpi = 300)
+```
+
+#### 5
+```{r}
+# Change for each
+corr_comp <- comps_combined[5,]
+
+# Import L2FC for mRNA and MIBS
+RNA_LFC <- data.frame(comp_list_oi_DE2_filt[corr_comp[,"comp_name_mRNA"]])
+MIBs_LFC <- data.frame(comp_list_oi_limma_filt[corr_comp[,"comp_protein"]])
+
+# row.names to column
+RNA_LFC$genes <- row.names(RNA_LFC)
+MIBs_LFC$genes <- row.names(MIBs_LFC)
+
+# Join RNA and MIBs
+proteo.transcriptomic_LFC <- left_join(RNA_LFC,MIBs_LFC , by= c("genes"="genes"))
+
+# Generate labels
+proteo.transcriptomic_LFC$mRNA_sig <- ifelse(proteo.transcriptomic_LFC[[grep("padj",colnames(proteo.transcriptomic_LFC),value = T)]] < 0.05, "Yes", "No")
+proteo.transcriptomic_LFC$MIB_sig <- ifelse(proteo.transcriptomic_LFC[[grep("adj.P.Val",colnames(proteo.transcriptomic_LFC),value = T)]]< 0.05, "Yes", "No")
+proteo.transcriptomic_LFC$mRNA_dir <- ifelse(proteo.transcriptomic_LFC[[grep("log2FoldChange",colnames(proteo.transcriptomic_LFC),value = T)]] < 0, "Down", "Up")
+proteo.transcriptomic_LFC$MIB_dir <- ifelse(proteo.transcriptomic_LFC[[grep("logFC",colnames(proteo.transcriptomic_LFC),value = T)]] < 0, "Down", "Up")
+
+# Generate labels
+proteo.transcriptomic_LFC$corr <-
+    ifelse((proteo.transcriptomic_LFC$MIB_sig == "Yes" &
+              proteo.transcriptomic_LFC$mRNA_sig == "Yes"),
+           "Both",
+           ifelse((proteo.transcriptomic_LFC$MIB_sig == "Yes" &
+                     proteo.transcriptomic_LFC$mRNA_sig == "No"),
+                  "MIBs",
+                  ifelse((proteo.transcriptomic_LFC$MIB_sig == "No" &
+                            proteo.transcriptomic_LFC$mRNA_sig == "Yes"),
+                         "mRNA",
+                         "Neither"
+                  )
+           )
+    )
+
+# Label Neither
+proteo.transcriptomic_LFC$corr[is.na(proteo.transcriptomic_LFC$corr)] <- "Neither"
+
+# # Label kinase receptors
+# proteo.transcriptomic_LFC$Receptor <-ifelse(proteo.transcriptomic_LFC$gene %in% Heatmap_GOI_df$gene_symbol, "Yes","No")
+
+# Convert to factors
+proteo.transcriptomic_LFC$mRNA_sig <- as.factor(proteo.transcriptomic_LFC$mRNA_sig)
+proteo.transcriptomic_LFC$MIB_sig <- as.factor(proteo.transcriptomic_LFC$MIB_sig)
+proteo.transcriptomic_LFC$mRNA_dir <- as.factor(proteo.transcriptomic_LFC$mRNA_dir)
+proteo.transcriptomic_LFC$MIB_dir <- as.factor(proteo.transcriptomic_LFC$MIB_dir)
+proteo.transcriptomic_LFC$corr <- as.factor(proteo.transcriptomic_LFC$corr)
+
+# Rename Columns
+names(proteo.transcriptomic_LFC)[grep("logFC",colnames(proteo.transcriptomic_LFC))] <- "MIBs"
+names(proteo.transcriptomic_LFC)[grep("log2FoldChange",colnames(proteo.transcriptomic_LFC))] <- "RNA"
+
+# Calculate correlation
+# Perform correlation test
+corr_test <- cor.test(proteo.transcriptomic_LFC$MIBs, proteo.transcriptomic_LFC$RNA, 
+                      method = "pearson", use = "complete.obs")
+
+# Extract values
+# Correlation coefficient
+corr_val <- corr_test$estimate
+# P-value
+p_val    <- corr_test$p.value     
+
+# Calculate annotation positions
+x_pos <- max(proteo.transcriptomic_LFC$MIBs, na.rm = TRUE)*(.60)
+y_pos <- min(proteo.transcriptomic_LFC$RNA, na.rm = TRUE)*(.95)
+
+# Generate Graph
+corr_plot <- ggplot(proteo.transcriptomic_LFC, aes(x = MIBs , y = RNA)) +
+    geom_point(aes(color = corr), size = 3) +
+    geom_label_repel(
+      aes(
+        label = ifelse((MIB_sig == "Yes" | mRNA_sig == "Yes"),
+          as.character(genes),
+          ''
+        )
+      ),
+      box.padding   = 0.35,
+      point.padding = 0.5,
+      segment.color = 'grey50',
+      max.overlaps = 30
+    ) +
+    labs(x = 'Protein (Log2 FC)', y ='mRNA (Log2 FC)' ) +
+    ggtitle(paste0(corr_comp["comp_num_protein"])) +
+    guides(fill = guide_legend(reverse = TRUE)) +
+    scale_color_manual(
+      "Significant",
+      values = c(
+        "Both" = "#984EA3",
+        "MIBs" = "#E41A1C",
+        "mRNA" = "#377EB8",
+        "Neither" = "#4DAF4A"
+      )
+    ) +
+    labs(caption = paste0("Pearson r = ", round(corr_val, 2), ", p = ", signif(p_val, 3))) +
+    theme_bw() +
+    theme(legend.position = 'right',
+          plot.caption = element_text(size = 10)) +
+    theme(panel.grid.minor = element_blank())
+
+corr_plot
+
+# Save graph
+ggsave(paste0(figures_dir,corr_comp["comp_num_protein"],"_correlation_scatter_plot.pdf"),
+       plot = corr_plot,
+       dpi = 300)
+```
+
+
+#### 6
+```{r}
+# Change for each
+corr_comp <- comps_combined[6,]
+
+# Import L2FC for mRNA and MIBS
+RNA_LFC <- data.frame(comp_list_oi_DE2_filt[corr_comp[,"comp_name_mRNA"]])
+MIBs_LFC <- data.frame(comp_list_oi_limma_filt[corr_comp[,"comp_protein"]])
+
+# row.names to column
+RNA_LFC$genes <- row.names(RNA_LFC)
+MIBs_LFC$genes <- row.names(MIBs_LFC)
+
+# Join RNA and MIBs
+proteo.transcriptomic_LFC <- left_join(RNA_LFC,MIBs_LFC , by= c("genes"="genes"))
+
+# Generate labels
+proteo.transcriptomic_LFC$mRNA_sig <- ifelse(proteo.transcriptomic_LFC[[grep("padj",colnames(proteo.transcriptomic_LFC),value = T)]] < 0.05, "Yes", "No")
+proteo.transcriptomic_LFC$MIB_sig <- ifelse(proteo.transcriptomic_LFC[[grep("adj.P.Val",colnames(proteo.transcriptomic_LFC),value = T)]]< 0.05, "Yes", "No")
+proteo.transcriptomic_LFC$mRNA_dir <- ifelse(proteo.transcriptomic_LFC[[grep("log2FoldChange",colnames(proteo.transcriptomic_LFC),value = T)]] < 0, "Down", "Up")
+proteo.transcriptomic_LFC$MIB_dir <- ifelse(proteo.transcriptomic_LFC[[grep("logFC",colnames(proteo.transcriptomic_LFC),value = T)]] < 0, "Down", "Up")
+
+# Generate labels
+proteo.transcriptomic_LFC$corr <-
+    ifelse((proteo.transcriptomic_LFC$MIB_sig == "Yes" &
+              proteo.transcriptomic_LFC$mRNA_sig == "Yes"),
+           "Both",
+           ifelse((proteo.transcriptomic_LFC$MIB_sig == "Yes" &
+                     proteo.transcriptomic_LFC$mRNA_sig == "No"),
+                  "MIBs",
+                  ifelse((proteo.transcriptomic_LFC$MIB_sig == "No" &
+                            proteo.transcriptomic_LFC$mRNA_sig == "Yes"),
+                         "mRNA",
+                         "Neither"
+                  )
+           )
+    )
+
+# Label Neither
+proteo.transcriptomic_LFC$corr[is.na(proteo.transcriptomic_LFC$corr)] <- "Neither"
+
+# # Label kinase receptors
+# proteo.transcriptomic_LFC$Receptor <-ifelse(proteo.transcriptomic_LFC$gene %in% Heatmap_GOI_df$gene_symbol, "Yes","No")
+
+# Convert to factors
+proteo.transcriptomic_LFC$mRNA_sig <- as.factor(proteo.transcriptomic_LFC$mRNA_sig)
+proteo.transcriptomic_LFC$MIB_sig <- as.factor(proteo.transcriptomic_LFC$MIB_sig)
+proteo.transcriptomic_LFC$mRNA_dir <- as.factor(proteo.transcriptomic_LFC$mRNA_dir)
+proteo.transcriptomic_LFC$MIB_dir <- as.factor(proteo.transcriptomic_LFC$MIB_dir)
+proteo.transcriptomic_LFC$corr <- as.factor(proteo.transcriptomic_LFC$corr)
+
+# Rename Columns
+names(proteo.transcriptomic_LFC)[grep("logFC",colnames(proteo.transcriptomic_LFC))] <- "MIBs"
+names(proteo.transcriptomic_LFC)[grep("log2FoldChange",colnames(proteo.transcriptomic_LFC))] <- "RNA"
+
+# Calculate correlation
+# Perform correlation test
+corr_test <- cor.test(proteo.transcriptomic_LFC$MIBs, proteo.transcriptomic_LFC$RNA, 
+                      method = "pearson", use = "complete.obs")
+
+# Extract values
+# Correlation coefficient
+corr_val <- corr_test$estimate
+# P-value
+p_val    <- corr_test$p.value     
+
+# Calculate annotation positions
+x_pos <- max(proteo.transcriptomic_LFC$MIBs, na.rm = TRUE)*(.60)
+y_pos <- min(proteo.transcriptomic_LFC$RNA, na.rm = TRUE)*(.95)
+
+# Generate Graph
+corr_plot <- ggplot(proteo.transcriptomic_LFC, aes(x = MIBs , y = RNA)) +
+    geom_point(aes(color = corr), size = 3) +
+    geom_label_repel(
+      aes(
+        label = ifelse((MIB_sig == "Yes" | mRNA_sig == "Yes"),
+          as.character(genes),
+          ''
+        )
+      ),
+      box.padding   = 0.35,
+      point.padding = 0.5,
+      segment.color = 'grey50',
+      max.overlaps = 30
+    ) +
+    labs(x = 'Protein (Log2 FC)', y ='mRNA (Log2 FC)' ) +
+    ggtitle(paste0(corr_comp["comp_num_protein"])) +
+    guides(fill = guide_legend(reverse = TRUE)) +
+    scale_color_manual(
+      "Significant",
+      values = c(
+        "Both" = "#984EA3",
+        "MIBs" = "#E41A1C",
+        "mRNA" = "#377EB8",
+        "Neither" = "#4DAF4A"
+      )
+    ) +
+  labs(caption = paste0("Pearson r = ", round(corr_val, 2), ", p = ", signif(p_val, 3))) +
+    theme_bw() +
+    theme(legend.position = 'right',
+          plot.caption = element_text(size = 10)) +
+    theme(panel.grid.minor = element_blank())
+
+corr_plot
+
+# Save graph
+ggsave(paste0(figures_dir,corr_comp["comp_num_protein"],"_correlation_scatter_plot.pdf"),
+       plot = corr_plot,
+       dpi = 300)
+```
+
+## ss
+### Import ss DE res
+```{r}
+
+fig.label <- paste0("Baseline_sig_corr")
+figures_dir <- paste0(Data,"Figures/",fig.label,"/")
+dir.create(figures_dir)
+
+# limma results direct
+output_dir_res <- paste0(Data,"Output/MIB-BL/DEP_Bl_Res_ss/","Limma_res/")
+
+# Summarize of limma comparisions
+comps_limma <- read.csv(paste0(Data,"Output/MIB-BL/DEP_Bl_Res_ss/","comps_all.csv"), row.names = 1)
+
+# import limma res
+subset_limmaRes <- list()
+for (i in seq_along(row.names(comps_limma))){
+  subset_limmaRes[[comps_limma$comp[i]]] <-
+  read.csv(paste0(output_dir_res,"comp_",i,"_",comps_limma[i,5],".csv"), row.names = 1)
+}
+
+# Extract comps_limma of interest
+coi_limma <- comps_limma[comps_limma$comp_denom %in% c("CEv3.starve"),]$comp
+comp_list_oi_limma <- subset_limmaRes[names(subset_limmaRes) %in% coi_limma]
+
+# DESEQ2 results direct
+output_dir_res <- paste0(Data,"Output/RNA/dds_EDA_subset/bl_Res_ss/","DE2_res/")
+
+# Summarize of DESEQ2 comparisions
+comps_DE2 <- read.csv(paste0(Data,"Output/RNA/dds_EDA_subset/bl_Res_ss/","comps_all.csv"), row.names = 1)
+
+# import DE2 res
+subset_DE2Res <- list()
+for (i in seq_along(comps_DE2$comp_name)){
+  subset_DE2Res[[comps_DE2$comp_name[i]]] <-
+  read.csv(paste0(output_dir_res,"comp_",i,"_",comps_DE2$comp_name[i],".csv"), row.names = 1)
+}
+
+# Extract comps_DE2 of interest
+coi_DE2 <- comps_DE2[comps_DE2$comp_denom %in% c("starve_CEv3_NA_0"),]$comp_name
+comp_list_oi_DE2 <- subset_DE2Res[names(subset_DE2Res) %in% coi_DE2]
+
+# Comps combined
+comps_df_limma <- comps_limma[comps_limma$comp_denom %in% c("CEv3.starve"),]
+colnames(comps_df_limma) <- paste(colnames(comps_df_limma),"protein",sep = "_")
+comps_df_DE2 <- comps_DE2[comps_DE2$comp_denom %in% c("starve_CEv3_NA_0"),]
+colnames(comps_df_DE2) <- paste(colnames(comps_df_DE2),"mRNA",sep = "_")
+
+# Cbind
+comps_combined <- cbind(comps_df_limma,comps_df_DE2)
+comps_combined
+
+# Remove genes not in signature
+
+# Remove protein genes not in signature
+comp_list_oi_limma_filt <- lapply(comp_list_oi_limma, function(x) subset(x,row.names(x) %in% c(BL_sig$gene)))
+
+# Remove RNA genes not in signature
+comp_list_oi_DE2_filt <- lapply(comp_list_oi_DE2, function(x) subset(x,row.names(x) %in% c(BL_sig$gene)))
+
+
+
+```
+
+### Corr plots SS
+### S.7A-F
+#### 1
+```{r}
+# Change for each
+corr_comp <- comps_combined[1,]
+
+# Import L2FC for mRNA and MIBS
+RNA_LFC <- data.frame(comp_list_oi_DE2_filt[corr_comp[,"comp_name_mRNA"]])
+MIBs_LFC <- data.frame(comp_list_oi_limma_filt[corr_comp[,"comp_protein"]])
+
+# row.names to column
+RNA_LFC$genes <- row.names(RNA_LFC)
+MIBs_LFC$genes <- row.names(MIBs_LFC)
+
+# Join RNA and MIBs
+proteo.transcriptomic_LFC <- left_join(RNA_LFC,MIBs_LFC , by= c("genes"="genes"))
+
+# Generate labels
+proteo.transcriptomic_LFC$mRNA_sig <- ifelse(proteo.transcriptomic_LFC[[grep("padj",colnames(proteo.transcriptomic_LFC),value = T)]] < 0.05, "Yes", "No")
+proteo.transcriptomic_LFC$MIB_sig <- ifelse(proteo.transcriptomic_LFC[[grep("adj.P.Val",colnames(proteo.transcriptomic_LFC),value = T)]]< 0.05, "Yes", "No")
+proteo.transcriptomic_LFC$mRNA_dir <- ifelse(proteo.transcriptomic_LFC[[grep("log2FoldChange",colnames(proteo.transcriptomic_LFC),value = T)]] < 0, "Down", "Up")
+proteo.transcriptomic_LFC$MIB_dir <- ifelse(proteo.transcriptomic_LFC[[grep("logFC",colnames(proteo.transcriptomic_LFC),value = T)]] < 0, "Down", "Up")
+
+# Generate labels
+proteo.transcriptomic_LFC$corr <-
+    ifelse((proteo.transcriptomic_LFC$MIB_sig == "Yes" &
+              proteo.transcriptomic_LFC$mRNA_sig == "Yes"),
+           "Both",
+           ifelse((proteo.transcriptomic_LFC$MIB_sig == "Yes" &
+                     proteo.transcriptomic_LFC$mRNA_sig == "No"),
+                  "MIBs",
+                  ifelse((proteo.transcriptomic_LFC$MIB_sig == "No" &
+                            proteo.transcriptomic_LFC$mRNA_sig == "Yes"),
+                         "mRNA",
+                         "Neither"
+                  )
+           )
+    )
+
+# Label Neither
+proteo.transcriptomic_LFC$corr[is.na(proteo.transcriptomic_LFC$corr)] <- "Neither"
+
+# # Label kinase receptors
+# proteo.transcriptomic_LFC$Receptor <-ifelse(proteo.transcriptomic_LFC$gene %in% Heatmap_GOI_df$gene_symbol, "Yes","No")
+
+# Convert to factors
+proteo.transcriptomic_LFC$mRNA_sig <- as.factor(proteo.transcriptomic_LFC$mRNA_sig)
+proteo.transcriptomic_LFC$MIB_sig <- as.factor(proteo.transcriptomic_LFC$MIB_sig)
+proteo.transcriptomic_LFC$mRNA_dir <- as.factor(proteo.transcriptomic_LFC$mRNA_dir)
+proteo.transcriptomic_LFC$MIB_dir <- as.factor(proteo.transcriptomic_LFC$MIB_dir)
+proteo.transcriptomic_LFC$corr <- as.factor(proteo.transcriptomic_LFC$corr)
+
+# Rename Columns
+names(proteo.transcriptomic_LFC)[grep("logFC",colnames(proteo.transcriptomic_LFC))] <- "MIBs"
+names(proteo.transcriptomic_LFC)[grep("log2FoldChange",colnames(proteo.transcriptomic_LFC))] <- "RNA"
+
+# Calculate correlation
+# Perform correlation test
+corr_test <- cor.test(proteo.transcriptomic_LFC$MIBs, proteo.transcriptomic_LFC$RNA, 
+                      method = "pearson", use = "complete.obs")
+
+# Extract values
+# Correlation coefficient
+corr_val <- corr_test$estimate
+# P-value
+p_val    <- corr_test$p.value     
+
+# Calculate annotation positions
+x_pos <- max(proteo.transcriptomic_LFC$MIBs, na.rm = TRUE)*(.60)
+y_pos <- min(proteo.transcriptomic_LFC$RNA, na.rm = TRUE)*(.95)
+
+# Generate Graph
+corr_plot <- ggplot(proteo.transcriptomic_LFC, aes(x = MIBs , y = RNA)) +
+    geom_point(aes(color = corr), size = 3) +
+    geom_label_repel(
+      aes(
+        label = ifelse((MIB_sig == "Yes" | mRNA_sig == "Yes"),
+          as.character(genes),
+          ''
+        )
+      ),
+      box.padding   = 0.35,
+      point.padding = 0.5,
+      segment.color = 'grey50',
+      max.overlaps = 30
+    ) +
+    labs(x = 'Protein (Log2 FC)', y ='mRNA (Log2 FC)' ) +
+    ggtitle(paste0(corr_comp["comp_num_protein"])) +
+    guides(fill = guide_legend(reverse = TRUE)) +
+    scale_color_manual(
+      "Significant",
+      values = c(
+        "Both" = "#984EA3",
+        "MIBs" = "#E41A1C",
+        "mRNA" = "#377EB8",
+        "Neither" = "#4DAF4A"
+      )
+    ) +
+  labs(caption = paste0("Pearson r = ", round(corr_val, 2), ", p = ", signif(p_val, 3))) +
+    theme_bw() +
+    theme(legend.position = 'right',
+          plot.caption = element_text(size = 10)) +
+    theme(panel.grid.minor = element_blank())
+
+corr_plot
+
+# Save graph
+ggsave(paste0(figures_dir,corr_comp["comp_num_protein"],"_correlation_scatter_plot.pdf"),
+       plot = corr_plot,
+       dpi = 300)
+```
+
+#### 2
+```{r}
+# Change for each
+corr_comp <- comps_combined[2,]
+
+# Import L2FC for mRNA and MIBS
+RNA_LFC <- data.frame(comp_list_oi_DE2_filt[corr_comp[,"comp_name_mRNA"]])
+MIBs_LFC <- data.frame(comp_list_oi_limma_filt[corr_comp[,"comp_protein"]])
+
+# row.names to column
+RNA_LFC$genes <- row.names(RNA_LFC)
+MIBs_LFC$genes <- row.names(MIBs_LFC)
+
+# Join RNA and MIBs
+proteo.transcriptomic_LFC <- left_join(RNA_LFC,MIBs_LFC , by= c("genes"="genes"))
+
+# Generate labels
+proteo.transcriptomic_LFC$mRNA_sig <- ifelse(proteo.transcriptomic_LFC[[grep("padj",colnames(proteo.transcriptomic_LFC),value = T)]] < 0.05, "Yes", "No")
+proteo.transcriptomic_LFC$MIB_sig <- ifelse(proteo.transcriptomic_LFC[[grep("adj.P.Val",colnames(proteo.transcriptomic_LFC),value = T)]]< 0.05, "Yes", "No")
+proteo.transcriptomic_LFC$mRNA_dir <- ifelse(proteo.transcriptomic_LFC[[grep("log2FoldChange",colnames(proteo.transcriptomic_LFC),value = T)]] < 0, "Down", "Up")
+proteo.transcriptomic_LFC$MIB_dir <- ifelse(proteo.transcriptomic_LFC[[grep("logFC",colnames(proteo.transcriptomic_LFC),value = T)]] < 0, "Down", "Up")
+
+# Generate labels
+proteo.transcriptomic_LFC$corr <-
+    ifelse((proteo.transcriptomic_LFC$MIB_sig == "Yes" &
+              proteo.transcriptomic_LFC$mRNA_sig == "Yes"),
+           "Both",
+           ifelse((proteo.transcriptomic_LFC$MIB_sig == "Yes" &
+                     proteo.transcriptomic_LFC$mRNA_sig == "No"),
+                  "MIBs",
+                  ifelse((proteo.transcriptomic_LFC$MIB_sig == "No" &
+                            proteo.transcriptomic_LFC$mRNA_sig == "Yes"),
+                         "mRNA",
+                         "Neither"
+                  )
+           )
+    )
+
+# Label Neither
+proteo.transcriptomic_LFC$corr[is.na(proteo.transcriptomic_LFC$corr)] <- "Neither"
+
+# # Label kinase receptors
+# proteo.transcriptomic_LFC$Receptor <-ifelse(proteo.transcriptomic_LFC$gene %in% Heatmap_GOI_df$gene_symbol, "Yes","No")
+
+# Convert to factors
+proteo.transcriptomic_LFC$mRNA_sig <- as.factor(proteo.transcriptomic_LFC$mRNA_sig)
+proteo.transcriptomic_LFC$MIB_sig <- as.factor(proteo.transcriptomic_LFC$MIB_sig)
+proteo.transcriptomic_LFC$mRNA_dir <- as.factor(proteo.transcriptomic_LFC$mRNA_dir)
+proteo.transcriptomic_LFC$MIB_dir <- as.factor(proteo.transcriptomic_LFC$MIB_dir)
+proteo.transcriptomic_LFC$corr <- as.factor(proteo.transcriptomic_LFC$corr)
+
+# Rename Columns
+names(proteo.transcriptomic_LFC)[grep("logFC",colnames(proteo.transcriptomic_LFC))] <- "MIBs"
+names(proteo.transcriptomic_LFC)[grep("log2FoldChange",colnames(proteo.transcriptomic_LFC))] <- "RNA"
+
+# Calculate correlation
+# Perform correlation test
+corr_test <- cor.test(proteo.transcriptomic_LFC$MIBs, proteo.transcriptomic_LFC$RNA, 
+                      method = "pearson", use = "complete.obs")
+
+# Extract values
+# Correlation coefficient
+corr_val <- corr_test$estimate
+# P-value
+p_val    <- corr_test$p.value     
+
+# Calculate annotation positions
+x_pos <- max(proteo.transcriptomic_LFC$MIBs, na.rm = TRUE)*(.60)
+y_pos <- min(proteo.transcriptomic_LFC$RNA, na.rm = TRUE)*(.95)
+
+# Generate Graph
+corr_plot <- ggplot(proteo.transcriptomic_LFC, aes(x = MIBs , y = RNA)) +
+    geom_point(aes(color = corr), size = 3) +
+    geom_label_repel(
+      aes(
+        label = ifelse((MIB_sig == "Yes" | mRNA_sig == "Yes"),
+          as.character(genes),
+          ''
+        )
+      ),
+      box.padding   = 0.35,
+      point.padding = 0.5,
+      segment.color = 'grey50',
+      max.overlaps = 30
+    ) +
+    labs(x = 'Protein (Log2 FC)', y ='mRNA (Log2 FC)' ) +
+    ggtitle(paste0(corr_comp["comp_num_protein"])) +
+    guides(fill = guide_legend(reverse = TRUE)) +
+    scale_color_manual(
+      "Significant",
+      values = c(
+        "Both" = "#984EA3",
+        "MIBs" = "#E41A1C",
+        "mRNA" = "#377EB8",
+        "Neither" = "#4DAF4A"
+      )
+    ) +
+  labs(caption = paste0("Pearson r = ", round(corr_val, 2), ", p = ", signif(p_val, 3))) +
+    theme_bw() +
+    theme(legend.position = 'right',
+          plot.caption = element_text(size = 10)) +
+    theme(panel.grid.minor = element_blank())
+
+corr_plot
+
+# Save graph
+ggsave(paste0(figures_dir,corr_comp["comp_num_protein"],"_correlation_scatter_plot.pdf"),
+       plot = corr_plot,
+       dpi = 300)
+```
+
+#### 3
+```{r}
+# Change for each
+corr_comp <- comps_combined[3,]
+
+# Import L2FC for mRNA and MIBS
+RNA_LFC <- data.frame(comp_list_oi_DE2_filt[corr_comp[,"comp_name_mRNA"]])
+MIBs_LFC <- data.frame(comp_list_oi_limma_filt[corr_comp[,"comp_protein"]])
+
+# row.names to column
+RNA_LFC$genes <- row.names(RNA_LFC)
+MIBs_LFC$genes <- row.names(MIBs_LFC)
+
+# Join RNA and MIBs
+proteo.transcriptomic_LFC <- left_join(RNA_LFC,MIBs_LFC , by= c("genes"="genes"))
+
+# Generate labels
+proteo.transcriptomic_LFC$mRNA_sig <- ifelse(proteo.transcriptomic_LFC[[grep("padj",colnames(proteo.transcriptomic_LFC),value = T)]] < 0.05, "Yes", "No")
+proteo.transcriptomic_LFC$MIB_sig <- ifelse(proteo.transcriptomic_LFC[[grep("adj.P.Val",colnames(proteo.transcriptomic_LFC),value = T)]]< 0.05, "Yes", "No")
+proteo.transcriptomic_LFC$mRNA_dir <- ifelse(proteo.transcriptomic_LFC[[grep("log2FoldChange",colnames(proteo.transcriptomic_LFC),value = T)]] < 0, "Down", "Up")
+proteo.transcriptomic_LFC$MIB_dir <- ifelse(proteo.transcriptomic_LFC[[grep("logFC",colnames(proteo.transcriptomic_LFC),value = T)]] < 0, "Down", "Up")
+
+# Generate labels
+proteo.transcriptomic_LFC$corr <-
+    ifelse((proteo.transcriptomic_LFC$MIB_sig == "Yes" &
+              proteo.transcriptomic_LFC$mRNA_sig == "Yes"),
+           "Both",
+           ifelse((proteo.transcriptomic_LFC$MIB_sig == "Yes" &
+                     proteo.transcriptomic_LFC$mRNA_sig == "No"),
+                  "MIBs",
+                  ifelse((proteo.transcriptomic_LFC$MIB_sig == "No" &
+                            proteo.transcriptomic_LFC$mRNA_sig == "Yes"),
+                         "mRNA",
+                         "Neither"
+                  )
+           )
+    )
+
+# Label Neither
+proteo.transcriptomic_LFC$corr[is.na(proteo.transcriptomic_LFC$corr)] <- "Neither"
+
+# # Label kinase receptors
+# proteo.transcriptomic_LFC$Receptor <-ifelse(proteo.transcriptomic_LFC$gene %in% Heatmap_GOI_df$gene_symbol, "Yes","No")
+
+# Convert to factors
+proteo.transcriptomic_LFC$mRNA_sig <- as.factor(proteo.transcriptomic_LFC$mRNA_sig)
+proteo.transcriptomic_LFC$MIB_sig <- as.factor(proteo.transcriptomic_LFC$MIB_sig)
+proteo.transcriptomic_LFC$mRNA_dir <- as.factor(proteo.transcriptomic_LFC$mRNA_dir)
+proteo.transcriptomic_LFC$MIB_dir <- as.factor(proteo.transcriptomic_LFC$MIB_dir)
+proteo.transcriptomic_LFC$corr <- as.factor(proteo.transcriptomic_LFC$corr)
+
+# Rename Columns
+names(proteo.transcriptomic_LFC)[grep("logFC",colnames(proteo.transcriptomic_LFC))] <- "MIBs"
+names(proteo.transcriptomic_LFC)[grep("log2FoldChange",colnames(proteo.transcriptomic_LFC))] <- "RNA"
+
+# Calculate correlation
+# Perform correlation test
+corr_test <- cor.test(proteo.transcriptomic_LFC$MIBs, proteo.transcriptomic_LFC$RNA, 
+                      method = "pearson", use = "complete.obs")
+
+# Extract values
+# Correlation coefficient
+corr_val <- corr_test$estimate
+# P-value
+p_val    <- corr_test$p.value     
+
+# Calculate annotation positions
+x_pos <- max(proteo.transcriptomic_LFC$MIBs, na.rm = TRUE)*(.60)
+y_pos <- min(proteo.transcriptomic_LFC$RNA, na.rm = TRUE)*(.95)
+
+# Generate Graph
+corr_plot <- ggplot(proteo.transcriptomic_LFC, aes(x = MIBs , y = RNA)) +
+    geom_point(aes(color = corr), size = 3) +
+    geom_label_repel(
+      aes(
+        label = ifelse((MIB_sig == "Yes" | mRNA_sig == "Yes"),
+          as.character(genes),
+          ''
+        )
+      ),
+      box.padding   = 0.35,
+      point.padding = 0.5,
+      segment.color = 'grey50',
+      max.overlaps = 30
+    ) +
+    labs(x = 'Protein (Log2 FC)', y ='mRNA (Log2 FC)' ) +
+    ggtitle(paste0(corr_comp["comp_num_protein"])) +
+    guides(fill = guide_legend(reverse = TRUE)) +
+    scale_color_manual(
+      "Significant",
+      values = c(
+        "Both" = "#984EA3",
+        "MIBs" = "#E41A1C",
+        "mRNA" = "#377EB8",
+        "Neither" = "#4DAF4A"
+      )
+    ) +
+  labs(caption = paste0("Pearson r = ", round(corr_val, 2), ", p = ", signif(p_val, 3))) +
+  theme_bw() +
+theme(legend.position = 'right',
+          plot.caption = element_text(size = 10)) +
+    theme(panel.grid.minor = element_blank())
+
+corr_plot
+
+# Save graph
+ggsave(paste0(figures_dir,corr_comp["comp_num_protein"],"_correlation_scatter_plot.pdf"),
+       plot = corr_plot,
+       dpi = 300)
+```
+
+#### 4
+```{r}
+# Change for each
+corr_comp <- comps_combined[4,]
+
+# Import L2FC for mRNA and MIBS
+RNA_LFC <- data.frame(comp_list_oi_DE2_filt[corr_comp[,"comp_name_mRNA"]])
+MIBs_LFC <- data.frame(comp_list_oi_limma_filt[corr_comp[,"comp_protein"]])
+
+# row.names to column
+RNA_LFC$genes <- row.names(RNA_LFC)
+MIBs_LFC$genes <- row.names(MIBs_LFC)
+
+# Join RNA and MIBs
+proteo.transcriptomic_LFC <- left_join(RNA_LFC,MIBs_LFC , by= c("genes"="genes"))
+
+# Generate labels
+proteo.transcriptomic_LFC$mRNA_sig <- ifelse(proteo.transcriptomic_LFC[[grep("padj",colnames(proteo.transcriptomic_LFC),value = T)]] < 0.05, "Yes", "No")
+proteo.transcriptomic_LFC$MIB_sig <- ifelse(proteo.transcriptomic_LFC[[grep("adj.P.Val",colnames(proteo.transcriptomic_LFC),value = T)]]< 0.05, "Yes", "No")
+proteo.transcriptomic_LFC$mRNA_dir <- ifelse(proteo.transcriptomic_LFC[[grep("log2FoldChange",colnames(proteo.transcriptomic_LFC),value = T)]] < 0, "Down", "Up")
+proteo.transcriptomic_LFC$MIB_dir <- ifelse(proteo.transcriptomic_LFC[[grep("logFC",colnames(proteo.transcriptomic_LFC),value = T)]] < 0, "Down", "Up")
+
+# Generate labels
+proteo.transcriptomic_LFC$corr <-
+    ifelse((proteo.transcriptomic_LFC$MIB_sig == "Yes" &
+              proteo.transcriptomic_LFC$mRNA_sig == "Yes"),
+           "Both",
+           ifelse((proteo.transcriptomic_LFC$MIB_sig == "Yes" &
+                     proteo.transcriptomic_LFC$mRNA_sig == "No"),
+                  "MIBs",
+                  ifelse((proteo.transcriptomic_LFC$MIB_sig == "No" &
+                            proteo.transcriptomic_LFC$mRNA_sig == "Yes"),
+                         "mRNA",
+                         "Neither"
+                  )
+           )
+    )
+
+# Label Neither
+proteo.transcriptomic_LFC$corr[is.na(proteo.transcriptomic_LFC$corr)] <- "Neither"
+
+# # Label kinase receptors
+# proteo.transcriptomic_LFC$Receptor <-ifelse(proteo.transcriptomic_LFC$gene %in% Heatmap_GOI_df$gene_symbol, "Yes","No")
+
+# Convert to factors
+proteo.transcriptomic_LFC$mRNA_sig <- as.factor(proteo.transcriptomic_LFC$mRNA_sig)
+proteo.transcriptomic_LFC$MIB_sig <- as.factor(proteo.transcriptomic_LFC$MIB_sig)
+proteo.transcriptomic_LFC$mRNA_dir <- as.factor(proteo.transcriptomic_LFC$mRNA_dir)
+proteo.transcriptomic_LFC$MIB_dir <- as.factor(proteo.transcriptomic_LFC$MIB_dir)
+proteo.transcriptomic_LFC$corr <- as.factor(proteo.transcriptomic_LFC$corr)
+
+# Rename Columns
+names(proteo.transcriptomic_LFC)[grep("logFC",colnames(proteo.transcriptomic_LFC))] <- "MIBs"
+names(proteo.transcriptomic_LFC)[grep("log2FoldChange",colnames(proteo.transcriptomic_LFC))] <- "RNA"
+
+# Calculate correlation
+# Perform correlation test
+corr_test <- cor.test(proteo.transcriptomic_LFC$MIBs, proteo.transcriptomic_LFC$RNA, 
+                      method = "pearson", use = "complete.obs")
+
+# Extract values
+# Correlation coefficient
+corr_val <- corr_test$estimate
+# P-value
+p_val    <- corr_test$p.value     
+
+# Calculate annotation positions
+x_pos <- max(proteo.transcriptomic_LFC$MIBs, na.rm = TRUE)*(.60)
+y_pos <- min(proteo.transcriptomic_LFC$RNA, na.rm = TRUE)*(.95)
+
+# Generate Graph
+corr_plot <- ggplot(proteo.transcriptomic_LFC, aes(x = MIBs , y = RNA)) +
+    geom_point(aes(color = corr), size = 3) +
+    geom_label_repel(
+      aes(
+        label = ifelse((MIB_sig == "Yes" | mRNA_sig == "Yes"),
+          as.character(genes),
+          ''
+        )
+      ),
+      box.padding   = 0.35,
+      point.padding = 0.5,
+      segment.color = 'grey50',
+      max.overlaps = 30
+    ) +
+    labs(x = 'Protein (Log2 FC)', y ='mRNA (Log2 FC)' ) +
+    ggtitle(paste0(corr_comp["comp_num_protein"])) +
+    guides(fill = guide_legend(reverse = TRUE)) +
+    scale_color_manual(
+      "Significant",
+      values = c(
+        "Both" = "#984EA3",
+        "MIBs" = "#E41A1C",
+        "mRNA" = "#377EB8",
+        "Neither" = "#4DAF4A"
+      )
+    ) +
+   labs(caption = paste0("Pearson r = ", round(corr_val, 2), ", p = ", signif(p_val, 3))) +
+    theme_bw() +
+    theme(legend.position = 'right',
+          plot.caption = element_text(size = 10)) +
+    theme(panel.grid.minor = element_blank())
+
+corr_plot
+
+# Save graph
+ggsave(paste0(figures_dir,corr_comp["comp_num_protein"],"_correlation_scatter_plot.pdf"),
+       plot = corr_plot,
+       dpi = 300)
+```
+
+#### 5
+```{r}
+# Change for each
+corr_comp <- comps_combined[5,]
+
+# Import L2FC for mRNA and MIBS
+RNA_LFC <- data.frame(comp_list_oi_DE2_filt[corr_comp[,"comp_name_mRNA"]])
+MIBs_LFC <- data.frame(comp_list_oi_limma_filt[corr_comp[,"comp_protein"]])
+
+# row.names to column
+RNA_LFC$genes <- row.names(RNA_LFC)
+MIBs_LFC$genes <- row.names(MIBs_LFC)
+
+# Join RNA and MIBs
+proteo.transcriptomic_LFC <- left_join(RNA_LFC,MIBs_LFC , by= c("genes"="genes"))
+
+# Generate labels
+proteo.transcriptomic_LFC$mRNA_sig <- ifelse(proteo.transcriptomic_LFC[[grep("padj",colnames(proteo.transcriptomic_LFC),value = T)]] < 0.05, "Yes", "No")
+proteo.transcriptomic_LFC$MIB_sig <- ifelse(proteo.transcriptomic_LFC[[grep("adj.P.Val",colnames(proteo.transcriptomic_LFC),value = T)]]< 0.05, "Yes", "No")
+proteo.transcriptomic_LFC$mRNA_dir <- ifelse(proteo.transcriptomic_LFC[[grep("log2FoldChange",colnames(proteo.transcriptomic_LFC),value = T)]] < 0, "Down", "Up")
+proteo.transcriptomic_LFC$MIB_dir <- ifelse(proteo.transcriptomic_LFC[[grep("logFC",colnames(proteo.transcriptomic_LFC),value = T)]] < 0, "Down", "Up")
+
+# Generate labels
+proteo.transcriptomic_LFC$corr <-
+    ifelse((proteo.transcriptomic_LFC$MIB_sig == "Yes" &
+              proteo.transcriptomic_LFC$mRNA_sig == "Yes"),
+           "Both",
+           ifelse((proteo.transcriptomic_LFC$MIB_sig == "Yes" &
+                     proteo.transcriptomic_LFC$mRNA_sig == "No"),
+                  "MIBs",
+                  ifelse((proteo.transcriptomic_LFC$MIB_sig == "No" &
+                            proteo.transcriptomic_LFC$mRNA_sig == "Yes"),
+                         "mRNA",
+                         "Neither"
+                  )
+           )
+    )
+
+# Label Neither
+proteo.transcriptomic_LFC$corr[is.na(proteo.transcriptomic_LFC$corr)] <- "Neither"
+
+# # Label kinase receptors
+# proteo.transcriptomic_LFC$Receptor <-ifelse(proteo.transcriptomic_LFC$gene %in% Heatmap_GOI_df$gene_symbol, "Yes","No")
+
+# Convert to factors
+proteo.transcriptomic_LFC$mRNA_sig <- as.factor(proteo.transcriptomic_LFC$mRNA_sig)
+proteo.transcriptomic_LFC$MIB_sig <- as.factor(proteo.transcriptomic_LFC$MIB_sig)
+proteo.transcriptomic_LFC$mRNA_dir <- as.factor(proteo.transcriptomic_LFC$mRNA_dir)
+proteo.transcriptomic_LFC$MIB_dir <- as.factor(proteo.transcriptomic_LFC$MIB_dir)
+proteo.transcriptomic_LFC$corr <- as.factor(proteo.transcriptomic_LFC$corr)
+
+# Rename Columns
+names(proteo.transcriptomic_LFC)[grep("logFC",colnames(proteo.transcriptomic_LFC))] <- "MIBs"
+names(proteo.transcriptomic_LFC)[grep("log2FoldChange",colnames(proteo.transcriptomic_LFC))] <- "RNA"
+
+# Calculate correlation
+# Perform correlation test
+corr_test <- cor.test(proteo.transcriptomic_LFC$MIBs, proteo.transcriptomic_LFC$RNA, 
+                      method = "pearson", use = "complete.obs")
+
+# Extract values
+# Correlation coefficient
+corr_val <- corr_test$estimate
+# P-value
+p_val    <- corr_test$p.value     
+
+# Calculate annotation positions
+x_pos <- max(proteo.transcriptomic_LFC$MIBs, na.rm = TRUE)*(.60)
+y_pos <- min(proteo.transcriptomic_LFC$RNA, na.rm = TRUE)*(.95)
+
+# Generate Graph
+corr_plot <- ggplot(proteo.transcriptomic_LFC, aes(x = MIBs , y = RNA)) +
+    geom_point(aes(color = corr), size = 3) +
+    geom_label_repel(
+      aes(
+        label = ifelse((MIB_sig == "Yes" | mRNA_sig == "Yes"),
+          as.character(genes),
+          ''
+        )
+      ),
+      box.padding   = 0.35,
+      point.padding = 0.5,
+      segment.color = 'grey50',
+      max.overlaps = 30
+    ) +
+    labs(x = 'Protein (Log2 FC)', y ='mRNA (Log2 FC)' ) +
+    ggtitle(paste0(corr_comp["comp_num_protein"])) +
+    guides(fill = guide_legend(reverse = TRUE)) +
+    scale_color_manual(
+      "Significant",
+      values = c(
+        "Both" = "#984EA3",
+        "MIBs" = "#E41A1C",
+        "mRNA" = "#377EB8",
+        "Neither" = "#4DAF4A"
+      )
+    ) +
+    labs(caption = paste0("Pearson r = ", round(corr_val, 2), ", p = ", signif(p_val, 3))) +
+    theme_bw() +
+    theme(legend.position = 'right',
+          plot.caption = element_text(size = 10)) +
+    theme(panel.grid.minor = element_blank())
+
+corr_plot
+
+# Save graph
+ggsave(paste0(figures_dir,corr_comp["comp_num_protein"],"_correlation_scatter_plot.pdf"),
+       plot = corr_plot,
+       dpi = 300)
+```
+
+
+#### 6
+```{r}
+# Change for each
+corr_comp <- comps_combined[6,]
+
+# Import L2FC for mRNA and MIBS
+RNA_LFC <- data.frame(comp_list_oi_DE2_filt[corr_comp[,"comp_name_mRNA"]])
+MIBs_LFC <- data.frame(comp_list_oi_limma_filt[corr_comp[,"comp_protein"]])
+
+# row.names to column
+RNA_LFC$genes <- row.names(RNA_LFC)
+MIBs_LFC$genes <- row.names(MIBs_LFC)
+
+# Join RNA and MIBs
+proteo.transcriptomic_LFC <- left_join(RNA_LFC,MIBs_LFC , by= c("genes"="genes"))
+
+# Generate labels
+proteo.transcriptomic_LFC$mRNA_sig <- ifelse(proteo.transcriptomic_LFC[[grep("padj",colnames(proteo.transcriptomic_LFC),value = T)]] < 0.05, "Yes", "No")
+proteo.transcriptomic_LFC$MIB_sig <- ifelse(proteo.transcriptomic_LFC[[grep("adj.P.Val",colnames(proteo.transcriptomic_LFC),value = T)]]< 0.05, "Yes", "No")
+proteo.transcriptomic_LFC$mRNA_dir <- ifelse(proteo.transcriptomic_LFC[[grep("log2FoldChange",colnames(proteo.transcriptomic_LFC),value = T)]] < 0, "Down", "Up")
+proteo.transcriptomic_LFC$MIB_dir <- ifelse(proteo.transcriptomic_LFC[[grep("logFC",colnames(proteo.transcriptomic_LFC),value = T)]] < 0, "Down", "Up")
+
+# Generate labels
+proteo.transcriptomic_LFC$corr <-
+    ifelse((proteo.transcriptomic_LFC$MIB_sig == "Yes" &
+              proteo.transcriptomic_LFC$mRNA_sig == "Yes"),
+           "Both",
+           ifelse((proteo.transcriptomic_LFC$MIB_sig == "Yes" &
+                     proteo.transcriptomic_LFC$mRNA_sig == "No"),
+                  "MIBs",
+                  ifelse((proteo.transcriptomic_LFC$MIB_sig == "No" &
+                            proteo.transcriptomic_LFC$mRNA_sig == "Yes"),
+                         "mRNA",
+                         "Neither"
+                  )
+           )
+    )
+
+# Label Neither
+proteo.transcriptomic_LFC$corr[is.na(proteo.transcriptomic_LFC$corr)] <- "Neither"
+
+# # Label kinase receptors
+# proteo.transcriptomic_LFC$Receptor <-ifelse(proteo.transcriptomic_LFC$gene %in% Heatmap_GOI_df$gene_symbol, "Yes","No")
+
+# Convert to factors
+proteo.transcriptomic_LFC$mRNA_sig <- as.factor(proteo.transcriptomic_LFC$mRNA_sig)
+proteo.transcriptomic_LFC$MIB_sig <- as.factor(proteo.transcriptomic_LFC$MIB_sig)
+proteo.transcriptomic_LFC$mRNA_dir <- as.factor(proteo.transcriptomic_LFC$mRNA_dir)
+proteo.transcriptomic_LFC$MIB_dir <- as.factor(proteo.transcriptomic_LFC$MIB_dir)
+proteo.transcriptomic_LFC$corr <- as.factor(proteo.transcriptomic_LFC$corr)
+
+# Rename Columns
+names(proteo.transcriptomic_LFC)[grep("logFC",colnames(proteo.transcriptomic_LFC))] <- "MIBs"
+names(proteo.transcriptomic_LFC)[grep("log2FoldChange",colnames(proteo.transcriptomic_LFC))] <- "RNA"
+
+# Calculate correlation
+# Perform correlation test
+corr_test <- cor.test(proteo.transcriptomic_LFC$MIBs, proteo.transcriptomic_LFC$RNA, 
+                      method = "pearson", use = "complete.obs")
+
+# Extract values
+# Correlation coefficient
+corr_val <- corr_test$estimate
+# P-value
+p_val    <- corr_test$p.value     
+
+# Calculate annotation positions
+x_pos <- max(proteo.transcriptomic_LFC$MIBs, na.rm = TRUE)*(.60)
+y_pos <- min(proteo.transcriptomic_LFC$RNA, na.rm = TRUE)*(.95)
+
+# Generate Graph
+corr_plot <- ggplot(proteo.transcriptomic_LFC, aes(x = MIBs , y = RNA)) +
+    geom_point(aes(color = corr), size = 3) +
+    geom_label_repel(
+      aes(
+        label = ifelse((MIB_sig == "Yes" | mRNA_sig == "Yes"),
+          as.character(genes),
+          ''
+        )
+      ),
+      box.padding   = 0.35,
+      point.padding = 0.5,
+      segment.color = 'grey50',
+      max.overlaps = 30
+    ) +
+    labs(x = 'Protein (Log2 FC)', y ='mRNA (Log2 FC)' ) +
+    ggtitle(paste0(corr_comp["comp_num_protein"])) +
+    guides(fill = guide_legend(reverse = TRUE)) +
+    scale_color_manual(
+      "Significant",
+      values = c(
+        "Both" = "#984EA3",
+        "MIBs" = "#E41A1C",
+        "mRNA" = "#377EB8",
+        "Neither" = "#4DAF4A"
+      )
+    ) +
+  labs(caption = paste0("Pearson r = ", round(corr_val, 2), ", p = ", signif(p_val, 3))) +
+    theme_bw() +
+    theme(legend.position = 'right',
+          plot.caption = element_text(size = 10)) +
+    theme(panel.grid.minor = element_blank())
+
+corr_plot
+
+# Save graph
+ggsave(paste0(figures_dir,corr_comp["comp_num_protein"],"_correlation_scatter_plot.pdf"),
+       plot = corr_plot,
+       dpi = 300)
+```
+
+
+# K Means protein heatmaps
+
+Setup
+```{r}
+# Clean environment
+rm(list = ls())
+gc()
+
+# Import setup workspace
+load(paste0("/Data/Input/Figures/setup_workspace.RData"))
+```
+
+Directories
+```{r}
+fig.label <- paste0("K_means_Protein")
+figures_dir <- paste0(Data,"Figures/",fig.label,"/")
+dir.create(figures_dir)
+
+```
+
+## Import data
+```{r}
+DEP_TMT_EDA_bc_ls <- readRDS(tail(grep("DEP_TMT_EDA_bc_ls.rds",list.files(paste0(Data,"Output/MIB-DYN/DEP_TMT_EDA"), recursive = F, full.names = T), value = T),1))
+cell_lines <- c("CEv3", "G12",  "G8"  , "G5"  , "G1" ,  "E5"  , "E4")
+DEP_TMT_EDA_bc_ls <- subset(DEP_TMT_EDA_bc_ls, names(DEP_TMT_EDA_bc_ls) %in% cell_lines)
+
+z_mat_clut_clid_ls <- readRDS(tail(grep("z_mat_clut_clid_ls.rds",list.files(paste0(Data,"Output/MIBs_TMT_Clustering_sig"), recursive = F, full.names = T), value = T),1))
+```
+
+## Heatmaps
+### CEv3
+#### Fig.5B
+```{r}
+
+cell_line <- "CEv3"
+
+# Values are already transformed. Extract to vsd
+vsd <- DEP_TMT_EDA_bc_ls[[cell_line]]
+head(assay(vsd),3)
+
+kmeans_res_clusters <- z_mat_clut_clid_ls[[cell_line]]
+
+# Subset dds to contain genes in the clustering analysis
+cluster_vsd <-vsd[row.names(vsd) %in% row.names(kmeans_res_clusters),]
+
+# Heatmap_GOI_df_ls
+heatmap_goi <- kmeans_res_clusters
+
+# Extract matrix values
+mat_list <- as.matrix(assay(cluster_vsd))
+
+# Heatmap annotation labels
+annotation_col <- HeatmapAnnotation(df = data.frame(Time = cluster_vsd@colData$Timepoint),
+    col = list(Time= 
+                 c(
+    '0'='black',
+    '4'='blue',
+    '24'='purple',
+    '48'='orange'
+  )
+  ))
+
+# Generate Heatmap
+Heatmap <- ComplexHeatmap::Heatmap(
+  t(scale(t(mat_list))),
+  top_annotation = annotation_col,
+  name = " ",
+  column_split = cluster_vsd@colData$Timepoint,
+  column_order = colnames(cluster_vsd)[order(cluster_vsd@colData$Timepoint)],
+  column_title = paste0(cell_line," 3 µM Afatinib"),
+  row_split = heatmap_goi[row.names(mat_list),]["label"] ,
+  row_gap = unit(1, "mm"),
+  show_column_names = F,
+  show_row_names = T,
+  row_names_gp = gpar(fontsize = 8),
+  width = ncol(mat_list)*unit(5, "mm"), 
+  height = nrow(mat_list)*unit(2.5, "mm")
+  )
+
+draw(Heatmap)
+
+# Get height and width of heatmap for pdf
+width = convertX(ComplexHeatmap:::width(draw(Heatmap)), "inch", valueOnly = TRUE)
+height = convertY(ComplexHeatmap:::height(draw(Heatmap)), "inch", valueOnly = TRUE)
+
+pdf(file=paste0(figures_dir, cell_line, ".pdf"), width = width+(0.01*width), height = height+(0.01*height))
+draw(Heatmap)
+dev.off()
+  
+```
+
+### E4
+#### S.8A
+```{r}
+
+cell_line <- "E4"
+
+# Values are already transformed. Extract to vsd
+vsd <- DEP_TMT_EDA_bc_ls[[cell_line]]
+head(assay(vsd),3)
+
+kmeans_res_clusters <- z_mat_clut_clid_ls[[cell_line]]
+
+# Subset dds to contain genes in the clustering analysis
+cluster_vsd <-vsd[row.names(vsd) %in% row.names(kmeans_res_clusters),]
+
+# Heatmap_GOI_df_ls
+heatmap_goi <- kmeans_res_clusters
+
+# Extract matrix values
+mat_list <- as.matrix(assay(cluster_vsd))
+
+# Heatmap annotation labels
+annotation_col <- HeatmapAnnotation(df = data.frame(Time = cluster_vsd@colData$Timepoint),
+    col = list(Time= 
+                 c(
+    '0'='black',
+    '4'='blue',
+    '24'='purple',
+    '48'='orange'
+  )
+  ))
+
+# Generate Heatmap
+Heatmap <- ComplexHeatmap::Heatmap(
+  t(scale(t(mat_list))),
+  top_annotation = annotation_col,
+  name = " ",
+  column_split = cluster_vsd@colData$Timepoint,
+  column_order = colnames(cluster_vsd)[order(cluster_vsd@colData$Timepoint)],
+  column_title = paste0(cell_line," 3 µM Afatinib"),
+  row_split = heatmap_goi[row.names(mat_list),]["label"] ,
+  row_gap = unit(1, "mm"),
+  show_column_names = F,
+  show_row_names = T,
+  row_names_gp = gpar(fontsize = 8),
+  width = ncol(mat_list)*unit(5, "mm"), 
+  height = nrow(mat_list)*unit(2.5, "mm")
+  )
+
+draw(Heatmap)
+
+# Get height and width of heatmap for pdf
+width = convertX(ComplexHeatmap:::width(draw(Heatmap)), "inch", valueOnly = TRUE)
+height = convertY(ComplexHeatmap:::height(draw(Heatmap)), "inch", valueOnly = TRUE)
+
+pdf(file=paste0(figures_dir, cell_line, ".pdf"), width = width+(0.01*width), height = height+(0.01*height))
+draw(Heatmap)
+dev.off()
+  
+```
+### E5
+#### S.8B
+```{r}
+
+cell_line <- "E5"
+
+# Values are already transformed. Extract to vsd
+vsd <- DEP_TMT_EDA_bc_ls[[cell_line]]
+head(assay(vsd),3)
+
+kmeans_res_clusters <- z_mat_clut_clid_ls[[cell_line]]
+
+# Subset dds to contain genes in the clustering analysis
+cluster_vsd <-vsd[row.names(vsd) %in% row.names(kmeans_res_clusters),]
+
+# Heatmap_GOI_df_ls
+heatmap_goi <- kmeans_res_clusters
+
+# Extract matrix values
+mat_list <- as.matrix(assay(cluster_vsd))
+
+# Heatmap annotation labels
+annotation_col <- HeatmapAnnotation(df = data.frame(Time = cluster_vsd@colData$Timepoint),
+    col = list(Time= 
+                 c(
+    '0'='black',
+    '4'='blue',
+    '24'='purple',
+    '48'='orange'
+  )
+  ))
+
+# Generate Heatmap
+Heatmap <- ComplexHeatmap::Heatmap(
+  t(scale(t(mat_list))),
+  top_annotation = annotation_col,
+  name = " ",
+  column_split = cluster_vsd@colData$Timepoint,
+  column_order = colnames(cluster_vsd)[order(cluster_vsd@colData$Timepoint)],
+  column_title = paste0(cell_line," 3 µM Afatinib"),
+  row_split = heatmap_goi[row.names(mat_list),]["label"] ,
+  row_gap = unit(1, "mm"),
+  show_column_names = F,
+  show_row_names = T,
+  row_names_gp = gpar(fontsize = 8),
+  width = ncol(mat_list)*unit(5, "mm"), 
+  height = nrow(mat_list)*unit(2.5, "mm")
+  )
+
+draw(Heatmap)
+
+# Get height and width of heatmap for pdf
+width = convertX(ComplexHeatmap:::width(draw(Heatmap)), "inch", valueOnly = TRUE)
+height = convertY(ComplexHeatmap:::height(draw(Heatmap)), "inch", valueOnly = TRUE)
+
+pdf(file=paste0(figures_dir, cell_line, ".pdf"), width = width+(0.01*width), height = height+(0.01*height))
+draw(Heatmap)
+dev.off()
+  
+```
+
+### G1
+#### S.8C
+```{r}
+
+cell_line <- "G1"
+
+# Values are already transformed. Extract to vsd
+vsd <- DEP_TMT_EDA_bc_ls[[cell_line]]
+head(assay(vsd),3)
+
+kmeans_res_clusters <- z_mat_clut_clid_ls[[cell_line]]
+
+# Subset dds to contain genes in the clustering analysis
+cluster_vsd <-vsd[row.names(vsd) %in% row.names(kmeans_res_clusters),]
+
+# Heatmap_GOI_df_ls
+heatmap_goi <- kmeans_res_clusters
+
+# Extract matrix values
+mat_list <- as.matrix(assay(cluster_vsd))
+
+# Heatmap annotation labels
+annotation_col <- HeatmapAnnotation(df = data.frame(Time = cluster_vsd@colData$Timepoint),
+    col = list(Time= 
+                 c(
+    '0'='black',
+    '4'='blue',
+    '24'='purple',
+    '48'='orange'
+  )
+  ))
+
+# Generate Heatmap
+Heatmap <- ComplexHeatmap::Heatmap(
+  t(scale(t(mat_list))),
+  top_annotation = annotation_col,
+  name = " ",
+  column_split = cluster_vsd@colData$Timepoint,
+  column_order = colnames(cluster_vsd)[order(cluster_vsd@colData$Timepoint)],
+  column_title = paste0(cell_line," 3 µM Afatinib"),
+  row_split = heatmap_goi[row.names(mat_list),]["label"] ,
+  row_gap = unit(1, "mm"),
+  show_column_names = F,
+  show_row_names = T,
+  row_names_gp = gpar(fontsize = 8),
+  width = ncol(mat_list)*unit(5, "mm"), 
+  height = nrow(mat_list)*unit(2.5, "mm")
+  )
+
+draw(Heatmap)
+
+# Get height and width of heatmap for pdf
+width = convertX(ComplexHeatmap:::width(draw(Heatmap)), "inch", valueOnly = TRUE)
+height = convertY(ComplexHeatmap:::height(draw(Heatmap)), "inch", valueOnly = TRUE)
+
+pdf(file=paste0(figures_dir, cell_line, ".pdf"), width = width+(0.01*width), height = height+(0.01*height))
+draw(Heatmap)
+dev.off()
+  
+```
+
+### G5
+#### S.8D
+```{r}
+
+cell_line <- "G5"
+
+# Values are already transformed. Extract to vsd
+vsd <- DEP_TMT_EDA_bc_ls[[cell_line]]
+head(assay(vsd),3)
+
+kmeans_res_clusters <- z_mat_clut_clid_ls[[cell_line]]
+
+# Subset dds to contain genes in the clustering analysis
+cluster_vsd <-vsd[row.names(vsd) %in% row.names(kmeans_res_clusters),]
+
+# Heatmap_GOI_df_ls
+heatmap_goi <- kmeans_res_clusters
+
+# Extract matrix values
+mat_list <- as.matrix(assay(cluster_vsd))
+
+# Heatmap annotation labels
+annotation_col <- HeatmapAnnotation(df = data.frame(Time = cluster_vsd@colData$Timepoint),
+    col = list(Time= 
+                 c(
+    '0'='black',
+    '4'='blue',
+    '24'='purple',
+    '48'='orange'
+  )
+  ))
+
+# Generate Heatmap
+Heatmap <- ComplexHeatmap::Heatmap(
+  t(scale(t(mat_list))),
+  top_annotation = annotation_col,
+  name = " ",
+  column_split = cluster_vsd@colData$Timepoint,
+  column_order = colnames(cluster_vsd)[order(cluster_vsd@colData$Timepoint)],
+  column_title = paste0(cell_line," 3 µM Afatinib"),
+  row_split = heatmap_goi[row.names(mat_list),]["label"] ,
+  row_gap = unit(1, "mm"),
+  show_column_names = F,
+  show_row_names = T,
+  row_names_gp = gpar(fontsize = 8),
+  width = ncol(mat_list)*unit(5, "mm"), 
+  height = nrow(mat_list)*unit(2.5, "mm")
+  )
+
+draw(Heatmap)
+
+# Get height and width of heatmap for pdf
+width = convertX(ComplexHeatmap:::width(draw(Heatmap)), "inch", valueOnly = TRUE)
+height = convertY(ComplexHeatmap:::height(draw(Heatmap)), "inch", valueOnly = TRUE)
+
+pdf(file=paste0(figures_dir, cell_line, ".pdf"), width = width+(0.01*width), height = height+(0.01*height))
+draw(Heatmap)
+dev.off()
+  
+```
+
+### G8
+#### S.8E
+```{r}
+
+cell_line <- "G8"
+
+# Values are already transformed. Extract to vsd
+vsd <- DEP_TMT_EDA_bc_ls[[cell_line]]
+head(assay(vsd),3)
+
+kmeans_res_clusters <- z_mat_clut_clid_ls[[cell_line]]
+
+# Subset dds to contain genes in the clustering analysis
+cluster_vsd <-vsd[row.names(vsd) %in% row.names(kmeans_res_clusters),]
+
+# Heatmap_GOI_df_ls
+heatmap_goi <- kmeans_res_clusters
+
+# Extract matrix values
+mat_list <- as.matrix(assay(cluster_vsd))
+
+# Heatmap annotation labels
+annotation_col <- HeatmapAnnotation(df = data.frame(Time = cluster_vsd@colData$Timepoint),
+    col = list(Time= 
+                 c(
+    '0'='black',
+    '4'='blue',
+    '24'='purple',
+    '48'='orange'
+  )
+  ))
+
+# Generate Heatmap
+Heatmap <- ComplexHeatmap::Heatmap(
+  t(scale(t(mat_list))),
+  top_annotation = annotation_col,
+  name = " ",
+  column_split = cluster_vsd@colData$Timepoint,
+  column_order = colnames(cluster_vsd)[order(cluster_vsd@colData$Timepoint)],
+  column_title = paste0(cell_line," 3 µM Afatinib"),
+  row_split = heatmap_goi[row.names(mat_list),]["label"] ,
+  row_gap = unit(1, "mm"),
+  show_column_names = F,
+  show_row_names = T,
+  row_names_gp = gpar(fontsize = 8),
+  width = ncol(mat_list)*unit(5, "mm"), 
+  height = nrow(mat_list)*unit(2.5, "mm")
+  )
+
+draw(Heatmap)
+
+# Get height and width of heatmap for pdf
+width = convertX(ComplexHeatmap:::width(draw(Heatmap)), "inch", valueOnly = TRUE)
+height = convertY(ComplexHeatmap:::height(draw(Heatmap)), "inch", valueOnly = TRUE)
+
+pdf(file=paste0(figures_dir, cell_line, ".pdf"), width = width+(0.01*width), height = height+(0.01*height))
+draw(Heatmap)
+dev.off()
+  
+```
+
+### G12
+#### S.8F
+```{r}
+
+cell_line <- "G12"
+
+# Values are already transformed. Extract to vsd
+vsd <- DEP_TMT_EDA_bc_ls[[cell_line]]
+head(assay(vsd),3)
+
+kmeans_res_clusters <- z_mat_clut_clid_ls[[cell_line]]
+
+# Subset dds to contain genes in the clustering analysis
+cluster_vsd <-vsd[row.names(vsd) %in% row.names(kmeans_res_clusters),]
+
+# Heatmap_GOI_df_ls
+heatmap_goi <- kmeans_res_clusters
+
+# Extract matrix values
+mat_list <- as.matrix(assay(cluster_vsd))
+
+# Heatmap annotation labels
+annotation_col <- HeatmapAnnotation(df = data.frame(Time = cluster_vsd@colData$Timepoint),
+    col = list(Time= 
+                 c(
+    '0'='black',
+    '4'='blue',
+    '24'='purple',
+    '48'='orange'
+  )
+  ))
+
+# Generate Heatmap
+Heatmap <- ComplexHeatmap::Heatmap(
+  t(scale(t(mat_list))),
+  top_annotation = annotation_col,
+  name = " ",
+  column_split = cluster_vsd@colData$Timepoint,
+  column_order = colnames(cluster_vsd)[order(cluster_vsd@colData$Timepoint)],
+  column_title = paste0(cell_line," 3 µM Afatinib"),
+  row_split = heatmap_goi[row.names(mat_list),]["label"] ,
+  row_gap = unit(1, "mm"),
+  show_column_names = F,
+  show_row_names = T,
+  row_names_gp = gpar(fontsize = 8),
+  width = ncol(mat_list)*unit(5, "mm"), 
+  height = nrow(mat_list)*unit(2.5, "mm")
+  )
+
+draw(Heatmap)
+
+# Get height and width of heatmap for pdf
+width = convertX(ComplexHeatmap:::width(draw(Heatmap)), "inch", valueOnly = TRUE)
+height = convertY(ComplexHeatmap:::height(draw(Heatmap)), "inch", valueOnly = TRUE)
+
+pdf(file=paste0(figures_dir, cell_line, ".pdf"), width = width+(0.01*width), height = height+(0.01*height))
+draw(Heatmap)
+dev.off()
+  
+```
+
+# K_means_Upset
+
+Directories
+```{r}
+fig.label <- paste0("K_means_Upset")
+figures_dir <- paste0(Data,"Figures/",fig.label,"/")
+dir.create(figures_dir)
+
+```
+
+
+## Import data
+```{r}
+cell_lines <- c("CEv3", "G12",  "G8"  , "G5"  , "G1" ,  "E5"  , "E4")
+
+z_mat_clut_clid_ls <- readRDS(tail(grep("z_mat_clut_clid_ls.rds",list.files(paste0(Data,"Output/MIBs_TMT_Clustering_sig"), recursive = F, full.names = T), value = T),1))
+```
+
+
+## Find intersecting genes
+```{r}
+
+z_mat_clut_clid_ls_res <- z_mat_clut_clid_ls
+
+# Extract Res group
+z_mat_clut_clid_ls_res <- subset(z_mat_clut_clid_ls, names(z_mat_clut_clid_ls) %in% c("CEv3", "G12",  "G8"  , "G5"  , "G1" ,  "E5"  , "E4"))
+
+# Extract genes in each cluster for all cell lines
+df_cluster_summary <- data.frame()
+for(i in seq_along(z_mat_clut_clid_ls_res)){
+  summary <- z_mat_clut_clid_ls_res[[i]] %>% summarise(label, gene=row.names(z_mat_clut_clid_ls_res[[i]]), Cell.Line = paste0(names(z_mat_clut_clid_ls_res)[i]))
+  df_cluster_summary <- rbind(df_cluster_summary,summary)
+}
+
+df_cluster_summary$Cell.cluster <- paste0(df_cluster_summary$Cell.Line,".",df_cluster_summary$label)
+
+# Find intersecting genes
+intersecting_vectors_ls <- list(down=subset(df_cluster_summary,df_cluster_summary$label=="down")$gene,
+                                up=subset(df_cluster_summary,df_cluster_summary$label=="up")$gene)
+
+intersect_genes <- intersect(intersecting_vectors_ls$down,intersecting_vectors_ls$up)
+intersect_genes
+
+```
+
+## Filter intersecting genes
+```{r}
+
+# List of vectors
+cluster_vectors_ls <- list()
+for(i in seq_along(unique(df_cluster_summary$Cell.cluster))){
+cluster_vectors_ls[[unique(df_cluster_summary$Cell.cluster)[i]]] <-
+  subset(df_cluster_summary, df_cluster_summary$Cell.cluster==unique(df_cluster_summary$Cell.cluster)[i])$gene
+}
+
+# Filter out intersecting genes
+cluster_vectors_filt_ls <- lapply(cluster_vectors_ls, function(x) x[!(x %in% intersect_genes)])
+
+# Separate into up and down
+cluster_vectors_down_ls <- subset(cluster_vectors_filt_ls,names(cluster_vectors_filt_ls) %in% c(grep("down",names(cluster_vectors_filt_ls),value=T)))
+cluster_vectors_up_ls <- subset(cluster_vectors_filt_ls,names(cluster_vectors_filt_ls) %in% c(grep("up",names(cluster_vectors_filt_ls),value=T)))
+
+```
+
+## CEv3_up_upset
+### Fig.5C
+```{r}
+
+# Directories 
+output_dir_upset <- paste0(figures_dir)
+graph_dir_upset <- paste0(figures_dir)
+
+# Convert list to binary matrix
+Upset_matrix <- ComplexHeatmap::list_to_matrix(cluster_vectors_up_ls)
+
+# Save Upset_matrix
+write.csv(Upset_matrix, file = paste0(output_dir_upset, "FullUpset_matrix",".csv"))
+
+# convert list to combination matrix
+combo_matrix <- ComplexHeatmap::make_comb_mat(Upset_matrix)
+
+# Color by intersection
+intersection_degree <- comb_degree(combo_matrix)
+comb_col <- ifelse(intersection_degree > 1, "blue", "red")
+
+# Generate upset plot
+upset_plot <- ComplexHeatmap::UpSet(combo_matrix , comb_col = comb_col,
+                        row_names_gp =gpar(fontsize = 12) ,
+                        top_annotation = upset_top_annotation(
+                          combo_matrix, 
+                          add_numbers = TRUE, 
+                          numbers_gp = gpar(fontsize = 11),
+                          numbers_rot=0,  
+                          annotation_name_rot = 90, 
+                          axis_param=list (gp = gpar(fontsize = 11)),
+                          annotation_name_gp= gpar(fontsize = 14)),
+                        right_annotation = upset_right_annotation(
+                          combo_matrix, 
+                          add_numbers = TRUE, 
+                          numbers_gp = gpar(fontsize = 11),
+                          numbers_rot=0,
+                          axis_param=list (gp = gpar(fontsize = 11)),
+                          annotation_name_gp= gpar(fontsize = 14)),
+                        pt_size = unit(8, "pt"))
+
+upset_plot
+
+# Save upset_plot
+pdf(file=paste0(graph_dir_upset, "CEv3_up_upset" , ".pdf"))
+draw(upset_plot)
+dev.off()
+
+# Combination matrix
+combo_matrix
+comb_name(combo_matrix)
+
+# Extract all from upset plot
+upset_genes_ls <- list()
+for(i in seq_along(comb_name(combo_matrix))){
+  upset_genes_ls[[paste0((set_name(combo_matrix)["1"==strsplit(comb_name(combo_matrix)[i],"")[[1]]])[1],"_",(set_name(combo_matrix)["1"==strsplit(comb_name(combo_matrix)[i],"")[[1]]])[2],"_",(set_name(combo_matrix)["1"==strsplit(comb_name(combo_matrix)[i],"")[[1]]])[3],"_",(set_name(combo_matrix)["1"==strsplit(comb_name(combo_matrix)[i],"")[[1]]])[4],"_",(set_name(combo_matrix)["1"==strsplit(comb_name(combo_matrix)[i],"")[[1]]])[5],"_",(set_name(combo_matrix)["1"==strsplit(comb_name(combo_matrix)[i],"")[[1]]])[6],"_",(set_name(combo_matrix)["1"==strsplit(comb_name(combo_matrix)[i],"")[[1]]])[7])]] <-
+    extract_comb(combo_matrix,comb_name(combo_matrix)[i])
+}
+
+# Convert to DF
+upset_genes_df <- do.call(cbind, lapply(upset_genes_ls, function(x) c(x, rep(NA, max(sapply(upset_genes_ls, length)) - length(x)))))
+
+
+# Save genes
+write.csv(upset_genes_df, file = paste0(output_dir_upset,"CEv3_up_upset",".csv"), na="")
+
+
+# Combination matrix
+combo_matrix
+
+# Find all positions in combo_matrix where there is greater than 1 overlap
+positions <- which(sapply(comb_name(combo_matrix), function(x) sum(strsplit(x, "")[[1]] == "1") == 1))
+
+positions[[1]]-1
+
+# Vector for at least one overlaping set.
+extraction_vector <- comb_name(combo_matrix)[1:positions[[1]]-1]
+
+
+# ol_up_genes overlap genes
+ol_up_genes <- c()
+for (i in seq_along(extraction_vector)){
+  x <- extract_comb(combo_matrix,extraction_vector[[i]])
+  ol_up_genes <- c(ol_up_genes,x)
+}
+
+# Unique CEv3.up genes
+cluster_vectors_up_ls[["CEv3.up"]][!(cluster_vectors_up_ls[["CEv3.up"]] %in% ol_up_genes)]
+CEv3_up_unique <- subset(z_mat_clut_clid_ls_res[["CEv3"]],(row.names(z_mat_clut_clid_ls_res[["CEv3"]]) %in% cluster_vectors_up_ls[["CEv3.up"]][!(cluster_vectors_up_ls[["CEv3.up"]] %in% ol_up_genes)]))
+CEv3_up_unique
+
+# Save genes
+write.csv(CEv3_up_unique, file = paste0(output_dir_upset,"EGFRi_up_Unique_Sig",".csv"))
+# write.csv(ol_up_genes, file = paste0(output_dir_upset,"OL_CEv3_genes",".csv"))
+
+
+```
+
+## CEv3_down_upset
+### Fig.5D
+```{r}
+
+# Directories 
+output_dir_upset <- paste0(figures_dir)
+graph_dir_upset <- paste0(figures_dir)
+
+# Convert list to binary matrix
+Upset_matrix <- ComplexHeatmap::list_to_matrix(cluster_vectors_down_ls)
+
+# Save Upset_matrix
+write.csv(Upset_matrix, file = paste0(output_dir_upset, "FullUpset_matrix",".csv"))
+
+# convert list to combination matrix
+combo_matrix <- ComplexHeatmap::make_comb_mat(Upset_matrix)
+
+
+# Color by intersection
+intersection_degree <- comb_degree(combo_matrix)
+comb_col <- ifelse(intersection_degree > 1, "blue", "red")
+
+# Generate upset plot
+upset_plot <- ComplexHeatmap::UpSet(combo_matrix , comb_col=comb_col,
+                        row_names_gp =gpar(fontsize = 12) ,
+                        top_annotation = upset_top_annotation(
+                          combo_matrix, 
+                          add_numbers = TRUE, 
+                          numbers_gp = gpar(fontsize = 11),
+                          numbers_rot=0,  
+                          annotation_name_rot = 90, 
+                          axis_param=list (gp = gpar(fontsize = 11)),
+                          annotation_name_gp= gpar(fontsize = 14)),
+                        right_annotation = upset_right_annotation(
+                          combo_matrix, 
+                          add_numbers = TRUE, 
+                          numbers_gp = gpar(fontsize = 11),
+                          numbers_rot=0,
+                          axis_param=list (gp = gpar(fontsize = 11)),
+                          annotation_name_gp= gpar(fontsize = 14)),
+                        pt_size = unit(8, "pt"))
+
+upset_plot
+
+# Save upset_plot
+pdf(file=paste0(graph_dir_upset, "CEv3_down_upset" , ".pdf"))
+draw(upset_plot)
+dev.off()
+
+# Combination matrix
+combo_matrix
+comb_name(combo_matrix)
+
+# Extract all from upset plot
+upset_genes_ls <- list()
+for(i in seq_along(comb_name(combo_matrix))){
+  upset_genes_ls[[paste0((set_name(combo_matrix)["1"==strsplit(comb_name(combo_matrix)[i],"")[[1]]])[1],"_",(set_name(combo_matrix)["1"==strsplit(comb_name(combo_matrix)[i],"")[[1]]])[2],"_",(set_name(combo_matrix)["1"==strsplit(comb_name(combo_matrix)[i],"")[[1]]])[3],"_",(set_name(combo_matrix)["1"==strsplit(comb_name(combo_matrix)[i],"")[[1]]])[4],"_",(set_name(combo_matrix)["1"==strsplit(comb_name(combo_matrix)[i],"")[[1]]])[5],"_",(set_name(combo_matrix)["1"==strsplit(comb_name(combo_matrix)[i],"")[[1]]])[6],"_",(set_name(combo_matrix)["1"==strsplit(comb_name(combo_matrix)[i],"")[[1]]])[7])]] <-
+    extract_comb(combo_matrix,comb_name(combo_matrix)[i])
+}
+
+# Convert to DF
+upset_genes_df <- do.call(cbind, lapply(upset_genes_ls, function(x) c(x, rep(NA, max(sapply(upset_genes_ls, length)) - length(x)))))
+
+
+# Save genes
+write.csv(upset_genes_df, file = paste0(output_dir_upset,"CEv3_down_upset",".csv"), na="")
+
+
+# Combination matrix
+combo_matrix
+
+# Find all positions in combo_matrix where there is greater than 1 overlap
+positions <- which(sapply(comb_name(combo_matrix), function(x) sum(strsplit(x, "")[[1]] == "1") == 1))
+
+positions[[1]]-1
+
+# Vector for at least one overlaping set.
+extraction_vector <- comb_name(combo_matrix)[1:positions[[1]]-1]
+
+
+# Extract overlap genes
+ol_down_genes <- c()
+for (i in seq_along(extraction_vector)){
+  x <- extract_comb(combo_matrix,extraction_vector[[i]])
+  ol_down_genes <- c(ol_down_genes,x)
+}
+
+# Unique CEv3.down genes
+cluster_vectors_down_ls[["CEv3.down"]][!(cluster_vectors_down_ls[["CEv3.down"]] %in% ol_down_genes)]
+CEv3_down_unique <- subset(z_mat_clut_clid_ls_res[["CEv3"]],(row.names(z_mat_clut_clid_ls_res[["CEv3"]]) %in% cluster_vectors_down_ls[["CEv3.down"]][!(cluster_vectors_down_ls[["CEv3.down"]] %in% ol_down_genes)]))
+CEv3_down_unique
+
+# Save genes
+write.csv(CEv3_down_unique, file = paste0(output_dir_upset,"EGFRi_down_Unique_Sig",".csv"))
+# write.csv(ol_down_genes, file = paste0(output_dir_upset,"CEv3_down_OL_CEv3_genes",".csv"))
+
+```
+
+
+
+## hEGFR_sig
+Comparisons with other signatures
+```{r}
+# Get EGFRi Signature
+CEv3_unique <- rbind(CEv3_down_unique,CEv3_up_unique)
+
+# Save EGFRi signature
+write.csv(CEv3_unique, file = paste0(output_dir_upset,"EGFRi_sig",".csv"))
+write.csv(row.names(CEv3_unique), file = paste0(output_dir_upset,"EGFRi_sig_genes",".csv"))
+
+
+# Import signatures
+BL_sigs_df <- read.csv(paste0(Data,"Figures/","Baseline_kinase_upset/","All_baseline_kinase_sig.csv"), row.names = 1, na.strings = c("","NA"))
+
+# Extract list of OL
+BL_sig_list <- list()
+for (i in seq_along(colnames(BL_sigs_df))){
+  BL_sig_list[[paste0(colnames(BL_sigs_df)[i])]] <-
+    BL_sigs_df[[paste0(colnames(BL_sigs_df)[i])]][!is.na(BL_sigs_df[[paste0(colnames(BL_sigs_df)[i])]])]
+}
+
+CEv3_sig_comp_list <- c(BL_sig_list,
+                           list(EGFRi_sig=row.names(CEv3_unique)))
+
+```
+
+
+## EGFRi_sig_upset
+### Fig.5E
+```{r}
+# Directories 
+output_dir_upset <- paste0(figures_dir)
+graph_dir_upset <- paste0(figures_dir)
+
+# Convert list to binary matrix
+Upset_matrix <- ComplexHeatmap::list_to_matrix(CEv3_sig_comp_list)
+
+# Save Upset_matrix
+write.csv(Upset_matrix, file = paste0(output_dir_upset, "CEv3_sig_upset_matrix",".csv"))
+
+# convert list to combination matrix
+combo_matrix <- ComplexHeatmap::make_comb_mat(Upset_matrix)
+
+# Color by intersection
+intersection_degree <- comb_degree(combo_matrix)
+comb_col <- ifelse(intersection_degree > 1, "blue", "red")
+
+# Generate upset plot
+upset_plot <- ComplexHeatmap::UpSet(combo_matrix, comb_col = comb_col,
+                        row_names_gp =gpar(fontsize = 12) ,
+                        top_annotation = upset_top_annotation(
+                          combo_matrix, 
+                          add_numbers = TRUE, 
+                          numbers_gp = gpar(fontsize = 11),
+                          numbers_rot=0,  
+                          annotation_name_rot = 90, 
+                          axis_param=list (gp = gpar(fontsize = 11)),
+                          annotation_name_gp= gpar(fontsize = 14)),
+                        right_annotation = upset_right_annotation(
+                          combo_matrix, 
+                          add_numbers = TRUE, 
+                          numbers_gp = gpar(fontsize = 11),
+                          numbers_rot=0,
+                          axis_param=list (gp = gpar(fontsize = 11)),
+                          annotation_name_gp= gpar(fontsize = 14)),
+                        pt_size = unit(8, "pt"))
+
+upset_plot
+
+# Save upset_plot
+pdf(file=paste0(graph_dir_upset, "EGFRi_sig_upset" , ".pdf"))
+draw(upset_plot)
+dev.off()
+
+# Combination matrix
+combo_matrix
+comb_name(combo_matrix)
+
+# Extract all from upset plot
+upset_genes_ls <- list()
+for(i in seq_along(comb_name(combo_matrix))){
+  upset_genes_ls[[paste0((set_name(combo_matrix)["1"==strsplit(comb_name(combo_matrix)[i],"")[[1]]])[1],"_",(set_name(combo_matrix)["1"==strsplit(comb_name(combo_matrix)[i],"")[[1]]])[2],"_",(set_name(combo_matrix)["1"==strsplit(comb_name(combo_matrix)[i],"")[[1]]])[3],"_",(set_name(combo_matrix)["1"==strsplit(comb_name(combo_matrix)[i],"")[[1]]])[4],"_",(set_name(combo_matrix)["1"==strsplit(comb_name(combo_matrix)[i],"")[[1]]])[5],"_",(set_name(combo_matrix)["1"==strsplit(comb_name(combo_matrix)[i],"")[[1]]])[6],"_",(set_name(combo_matrix)["1"==strsplit(comb_name(combo_matrix)[i],"")[[1]]])[7])]] <-
+    extract_comb(combo_matrix,comb_name(combo_matrix)[i])
+}
+
+# Convert to DF
+upset_genes_df <- do.call(cbind, lapply(upset_genes_ls, function(x) c(x, rep(NA, max(sapply(upset_genes_ls, length)) - length(x)))))
+
+
+# Save genes
+write.csv(upset_genes_df, file = paste0(output_dir_upset,"EGFRi_sig_upset_genes_df",".csv"), na = "")
+
+```
+
+# EGFRi_CEv3_heatmap
+
+Setup
+```{r}
+# Clean environment
+rm(list = ls())
+gc()
+
+# Import setup workspace
+load(paste0("/Data/Input/Figures/setup_workspace.RData"))
+```
+
+Directories
+```{r}
+fig.label <- paste0("EGFRi_CEv3_heatmap")
+figures_dir <- paste0(Data,"Figures/",fig.label,"/")
+dir.create(figures_dir)
+
+```
+
+## Import data
+```{r}
+# Transformed counts
+DEP_TMT_EDA_bc_ls <- readRDS(tail(grep("DEP_TMT_EDA_bc_ls.rds",list.files(paste0(Data,"Output/MIB-DYN/DEP_TMT_EDA"), recursive = F, full.names = T), value = T),1))
+
+cell_lines <- c("CEv3")
+DEP_TMT_EDA_bc_ls <- subset(DEP_TMT_EDA_bc_ls, names(DEP_TMT_EDA_bc_ls) %in% cell_lines)
+
+# K means clustering results
+z_mat_clut_clid_ls <- readRDS(tail(grep("z_mat_clut_clid_ls.rds",list.files(paste0(Data,"Output/MIBs_TMT_Clustering_sig"), recursive = F, full.names = T), value = T),1))
+
+# EGFRi sig
+# BL_sig
+EGFRi_sig <- read.csv(paste0(Data,"Figures/K_means_Upset/","EGFRi_sig_genes.csv"), row.names = 1, na.strings = c("","NA"))
+
+```
+
+## Heatmaps
+### CEv3
+#### Fig.6A
+```{r}
+
+cell_line <- "CEv3"
+
+# Values are already transformed. Extract to vsd
+vsd <- DEP_TMT_EDA_bc_ls[[cell_line]]
+head(assay(vsd),3)
+
+kmeans_res_clusters <- z_mat_clut_clid_ls[[cell_line]]
+
+# Subset dds to contain genes in the clustering analysis
+cluster_vsd <-vsd[row.names(vsd) %in% row.names(kmeans_res_clusters),]
+
+# Further subset to contain genes in EGFRi_sig
+cluster_vsd <- cluster_vsd[row.names(cluster_vsd) %in% EGFRi_sig[,1],]
+
+# Heatmap_GOI_df_ls
+heatmap_goi <- kmeans_res_clusters
+
+# Extract matrix values
+mat_list <- as.matrix(assay(cluster_vsd))
+
+# Heatmap annotation labels
+annotation_col <- HeatmapAnnotation(df = data.frame(Time = cluster_vsd@colData$Timepoint),
+    col = list(Time= 
+                 c(
+    '0'='black',
+    '4'='blue',
+    '24'='purple',
+    '48'='orange'
+  )
+  ))
+
+# Generate Heatmap
+Heatmap <- ComplexHeatmap::Heatmap(
+  t(scale(t(mat_list))),
+  top_annotation = annotation_col,
+  name = " ",
+  column_split = cluster_vsd@colData$Timepoint,
+  column_order = colnames(cluster_vsd)[order(cluster_vsd@colData$Timepoint)],
+  column_title = paste0(cell_line," EGFRi signature"),
+  row_split = heatmap_goi[row.names(mat_list),]["label"] ,
+  row_gap = unit(1, "mm"),
+  show_column_names = F,
+  show_row_names = T,
+  row_names_gp = gpar(fontsize = 8),
+  width = ncol(mat_list)*unit(5, "mm"), 
+  height = nrow(mat_list)*unit(2.5, "mm")
+  )
+
+draw(Heatmap)
+
+# Get height and width of heatmap for pdf
+width = convertX(ComplexHeatmap:::width(draw(Heatmap)), "inch", valueOnly = TRUE)
+height = convertY(ComplexHeatmap:::height(draw(Heatmap)), "inch", valueOnly = TRUE)
+
+pdf(file=paste0(figures_dir, cell_line, ".pdf"), width = width+(0.01*width), height = height+(0.01*height))
+draw(Heatmap)
+dev.off()
+  
+```
+
+
+# mRNA_dynTKI_heatmap
+
+Setup
+```{r}
+# Clean environment
+rm(list = ls())
+gc()
+
+# Import setup workspace
+load(paste0("/Data/Input/Figures/setup_workspace.RData"))
+```
+
+Directories
+```{r}
+fig.label <- paste0("mRNA_dynTKI_heatmap")
+figures_dir <- paste0(Data,"Figures/",fig.label,"/")
+dir.create(figures_dir)
+
+```
+
+## Import data
+```{r}
+Afat_mRNA_dynTKI <- readRDS(tail(grep("Afat_CEv3_starve.rds",list.files(paste0(Data,"Output/RNA/dds_EDA_subset/Afat_CEv3_starve"), recursive = F, full.names = T), value = T),1))
+
+Ner_mRNA_dynTKI <- readRDS(tail(grep("Ner_CEv3_1_starve.rds",list.files(paste0(Data,"Output/RNA/dds_EDA_subset/Ner_CEv3_1_starve"), recursive = F, full.names = T), value = T),1))
+
+z_mat_clut_clid_ls <- readRDS(tail(grep("z_mat_clut_clid_ls.rds",list.files(paste0(Data,"Output/mRNA_dynTKI/Sig_CLustering"), recursive = F, full.names = T), value = T),1))
+```
+
+## Heatmaps
+
+### Afatinib
+#### S.10A
+```{r}
+EGFR_TKI <- "Afatinib"
+
+# vsd transformation
+vsd <- vst(Afat_mRNA_dynTKI, blind=T, nsub=1000, fitType = "parametric")
+head(assay(vsd),3)
+
+kmeans_res_clusters <- z_mat_clut_clid_ls[[EGFR_TKI]]
+
+# Subset dds to contain genes in the clustering analysis
+cluster_vsd <-vsd[row.names(vsd) %in% row.names(kmeans_res_clusters),]
+
+# Heatmap_GOI_df_ls
+heatmap_goi <- kmeans_res_clusters
+
+# Extract matrix values
+mat_list <- as.matrix(assay(cluster_vsd))
+
+# Heatmap annotation labels
+annotation_col <- HeatmapAnnotation(df = data.frame(Time = cluster_vsd@colData$time_h),
+    col = list(Time= 
+                 c(
+    '0'='black',
+    '4'='blue',
+    '24'='purple',
+    '48'='orange'
+  )
+  ))
+
+# Generate Heatmap
+Heatmap <- ComplexHeatmap::Heatmap(
+  t(scale(t(mat_list))),
+  top_annotation = annotation_col,
+  name = " ",
+  column_split = cluster_vsd@colData$time_h,
+  column_order = colnames(cluster_vsd)[order(cluster_vsd@colData$time_h)],
+  column_title = paste0(EGFR_TKI," 3 µM "),
+  row_split = heatmap_goi[row.names(mat_list),]["label"] ,
+  row_gap = unit(1, "mm"),
+  show_column_names = F,
+  show_row_names = F,
+  width = ncol(mat_list)*unit(5, "mm")
+  )
+
+draw(Heatmap)
+
+# Get height and width of heatmap for pdf
+width = convertX(ComplexHeatmap:::width(draw(Heatmap)), "inch", valueOnly = TRUE)
+height = convertY(ComplexHeatmap:::height(draw(Heatmap)), "inch", valueOnly = TRUE)
+
+pdf(file=paste0(figures_dir, EGFR_TKI, ".pdf"), width = width+(0.01*width), height = height+(0.01*height))
+draw(Heatmap)
+dev.off()
+  
+```
+
+### Neratinib
+#### S.10B
+```{r}
+EGFR_TKI <- "Neratinib"
+
+# vsd transformation
+vsd <- vst(Ner_mRNA_dynTKI, blind=T, nsub=1000, fitType = "parametric")
+head(assay(vsd),3)
+
+kmeans_res_clusters <- z_mat_clut_clid_ls[[EGFR_TKI]]
+
+# Subset dds to contain genes in the clustering analysis
+cluster_vsd <-vsd[row.names(vsd) %in% row.names(kmeans_res_clusters),]
+
+# Heatmap_GOI_df_ls
+heatmap_goi <- kmeans_res_clusters
+
+# Extract matrix values
+mat_list <- as.matrix(assay(cluster_vsd))
+
+# Heatmap annotation labels
+annotation_col <- HeatmapAnnotation(df = data.frame(Time = cluster_vsd@colData$time_h),
+    col = list(Time= 
+                 c(
+    '0'='black',
+    '4'='blue',
+    '24'='purple',
+    '48'='orange'
+  )
+  ))
+
+# Generate Heatmap
+Heatmap <- ComplexHeatmap::Heatmap(
+  t(scale(t(mat_list))),
+  top_annotation = annotation_col,
+  name = " ",
+  column_split = cluster_vsd@colData$time_h,
+  column_order = colnames(cluster_vsd)[order(cluster_vsd@colData$time_h)],
+  column_title = paste0(EGFR_TKI," 3 µM"),
+  row_split = heatmap_goi[row.names(mat_list),]["label"] ,
+  row_gap = unit(1, "mm"),
+  show_column_names = F,
+  show_row_names = F,
+  width = ncol(mat_list)*unit(5, "mm")
+  )
+
+draw(Heatmap)
+
+# Get height and width of heatmap for pdf
+width = convertX(ComplexHeatmap:::width(draw(Heatmap)), "inch", valueOnly = TRUE)
+height = convertY(ComplexHeatmap:::height(draw(Heatmap)), "inch", valueOnly = TRUE)
+
+pdf(file=paste0(figures_dir, EGFR_TKI, ".pdf"), width = width+(0.01*width), height = height+(0.01*height))
+draw(Heatmap)
+dev.off()
+  
+```
+
+# mRNA_dynTKI_upset
+Directories
+```{r}
+fig.label <- paste0("mRNA_dynTKI_upset")
+figures_dir <- paste0(Data,"Figures/",fig.label,"/")
+dir.create(figures_dir)
+
+```
+
+## Import data
+```{r}
+z_mat_clut_clid_ls <- readRDS(tail(grep("z_mat_clut_clid_ls.rds",list.files(paste0(Data,"Output/mRNA_dynTKI/Sig_CLustering"), recursive = F, full.names = T), value = T),1))
+```
+
+## Remove intersecting genes
+```{r}
+# Extract Res group
+z_mat_clut_clid_ls_res <- subset(z_mat_clut_clid_ls, names(z_mat_clut_clid_ls) %in% c("Afatinib", "Neratinib"))
+
+# Extract genes in each cluster for all cell lines
+df_cluster_summary <- data.frame()
+for(i in seq_along(z_mat_clut_clid_ls_res)){
+  summary <- z_mat_clut_clid_ls_res[[i]] %>% summarise(label, gene=row.names(z_mat_clut_clid_ls_res[[i]]), Drug = paste0(names(z_mat_clut_clid_ls_res)[i]))
+  df_cluster_summary <- rbind(df_cluster_summary,summary)
+}
+
+df_cluster_summary$Drug.cluster <- paste0(df_cluster_summary$Drug,".",df_cluster_summary$label)
+
+# List of vectors
+cluster_vectors_ls <- list()
+for(i in seq_along(unique(df_cluster_summary$Drug.cluster))){
+cluster_vectors_ls[[unique(df_cluster_summary$Drug.cluster)[i]]] <-
+  subset(df_cluster_summary, df_cluster_summary$Drug.cluster==unique(df_cluster_summary$Drug.cluster)[i])$gene
+}
+
+# Find intersecting genes
+intersect_genes <- c(intersect(cluster_vectors_ls$Afatinib.down,cluster_vectors_ls$Neratinib.up),intersect(cluster_vectors_ls$Afatinib.up,cluster_vectors_ls$Neratinib.down))
+
+# Filter out intersecting genes
+cluster_vectors_filt_ls <- lapply(cluster_vectors_ls, function(x) x[!(x %in% intersect_genes)])
+```
+
+
+## upset
+### S.10C
+```{r}
+
+# Directories 
+output_dir_upset <- paste0(figures_dir)
+graph_dir_upset <- paste0(figures_dir)
+
+# Convert list to binary matrix
+Upset_matrix <- ComplexHeatmap::list_to_matrix(cluster_vectors_filt_ls)
+
+# Save Upset_matrix
+write.csv(Upset_matrix, file = paste0(output_dir_upset, "FullUpset_matrix",".csv"))
+
+# convert list to combination matrix
+combo_matrix <- ComplexHeatmap::make_comb_mat(Upset_matrix)
+
+
+# Color by intersection
+intersection_degree <- comb_degree(combo_matrix)
+comb_col <- ifelse(intersection_degree > 1, "blue", "red")
+
+# Generate upset plot
+upset_plot <- ComplexHeatmap::UpSet(combo_matrix , comb_col=comb_col,
+                        row_names_gp =gpar(fontsize = 12) ,
+                        top_annotation = upset_top_annotation(
+                          combo_matrix, 
+                          add_numbers = TRUE, 
+                          numbers_gp = gpar(fontsize = 11),
+                          numbers_rot=0,  
+                          annotation_name_rot = 90, 
+                          axis_param=list (gp = gpar(fontsize = 11)),
+                          annotation_name_gp= gpar(fontsize = 14)),
+                        right_annotation = upset_right_annotation(
+                          combo_matrix, 
+                          add_numbers = TRUE, 
+                          numbers_gp = gpar(fontsize = 11),
+                          numbers_rot=0,
+                          axis_param=list (gp = gpar(fontsize = 11)),
+                          annotation_name_gp= gpar(fontsize = 14)),
+                        pt_size = unit(8, "pt"))
+
+upset_plot
+
+# Save upset_plot
+pdf(file=paste0(graph_dir_upset, "mRNA_dynTKI_upset" , ".pdf"))
+draw(upset_plot)
+dev.off()
+
+
+# Combination matrix
+combo_matrix
+comb_name(combo_matrix)
+
+# Extract all from upset plot
+upset_genes_ls <- list()
+for(i in seq_along(comb_name(combo_matrix))){
+  upset_genes_ls[[paste0((set_name(combo_matrix)["1"==strsplit(comb_name(combo_matrix)[i],"")[[1]]])[1],"_",(set_name(combo_matrix)["1"==strsplit(comb_name(combo_matrix)[i],"")[[1]]])[2])]] <-
+    extract_comb(combo_matrix,comb_name(combo_matrix)[i])
+}
+
+# Convert to DF
+upset_genes_df <- do.call(cbind, lapply(upset_genes_ls, function(x) c(x, rep(NA, max(sapply(upset_genes_ls, length)) - length(x)))))
+
+# Save genes
+write.csv(upset_genes_df, file = paste0(output_dir_upset,"upset_genes_df",".csv"))
+
+# Extract genes
+mRNA_OL_down <- upset_genes_ls[["Afatinib.down_Neratinib.down"]]
+mRNA_OL_up <- upset_genes_ls[["Afatinib.up_Neratinib.up"]]
+
+mRNA_Afat_down <- upset_genes_ls[["Afatinib.down_NA"]]
+mRNA_Afat_up <- upset_genes_ls[["Afatinib.up_NA"]]
+mRNA_Ner_down <- upset_genes_ls[["Neratinib.down_NA"]]
+mRNA_Ner_up <- upset_genes_ls[["Neratinib.up_NA"]]
+
+# Save genes
+write.csv(mRNA_OL_down, file = paste0(output_dir_upset,"mRNA_OL_down",".csv"))
+write.csv(mRNA_OL_up, file = paste0(output_dir_upset,"mRNA_OL_up",".csv"))
+
+write.csv(mRNA_Afat_down, file = paste0(output_dir_upset,"mRNA_Afat_down",".csv"))
+write.csv(mRNA_Afat_up, file = paste0(output_dir_upset,"mRNA_Afat_up",".csv"))
+write.csv(mRNA_Ner_down, file = paste0(output_dir_upset,"mRNA_Ner_down",".csv"))
+write.csv(mRNA_Ner_up, file = paste0(output_dir_upset,"mRNA_Ner_up",".csv"))
+```
+
+# Timing End
+```{r timing end}
+proc.time() - ptm
+```
+
+# Session Info
+```{r session}
+sessionInfo()
+```

@@ -1,0 +1,1520 @@
+---
+title: "04_RNAseq"
+author: "Benjamin Lin"
+editor: "C Ryan Miller"
+date: '`r format(Sys.time(), "Last modified: %d %b %Y")`'
+output:
+  html_document:
+    toc: yes
+    toc_float: yes
+    toc_depth: 6 
+    code_folding: hide
+layout: page
+subtitle: "C Ryan Miller Lab @ UAB"
+affiliation: UAB
+editor_options: 
+  chunk_output_type: inline
+  markdown: 
+    wrap: sentence
+---
+
+This R Markdown (RMD) file performs exploratory data analysis (EDA) and differential expression (DE) analysis for the 2025 Lin manuscript.
+
+Script Timing Start
+```{r}
+ptm <- proc.time()
+```
+
+Docker mount directory
+```{r}
+Data <- paste0("/Data/")
+```
+
+## Variables
+```{r}
+# adjusted pvalue
+qval <- 0.05
+pval <- 0.05
+lfc <- 1
+
+# Use max of 4 cores if available.
+ncore <- ifelse((detectCores()-2)>=4,4,detectCores()-2)
+```
+
+Set.Seed
+```{r}
+# This will set the random number generator
+set.seed(888)
+```
+
+# RNASeq data
+## Directories
+```{r}
+# output directory
+RNA_output <- paste0(Data, "Output/RNA/")
+dir.create(paste0(RNA_output))
+
+# Graphs
+RNA_graphs <- paste0(Data, "Graphs/RNA/")
+dir.create(paste0(RNA_graphs))
+```
+
+## RNAseq Tx/Gene matricies
+### Ensembl Tx2Gene IDs
+```{r}
+# Gencode Mouse Genome Primary assembly vM32
+system.time(gtf <- readGFF("/Data/Input/RNAseq/REF/gencode.vM32.primary_assembly.annotation.gtf.gz"))
+
+# Extract from gtf
+cols <- names(gtf) %in% c("gene_id", "transcript_id", "gene_name")
+ens <- gtf[cols]
+
+ens <- na.omit(ens, cols = c("transcript_id"))
+ens<- unique(ens)
+
+# Add in human EGFR
+ens <- rbind(ens, c("ENSG00000146648.17", "hEGFR", "ENST00000275493.7"))
+
+# Tx to Ensembl IDs
+cols <- names(ens) %in% c("gene_id", "transcript_id")
+tx2gene_ensembl <- ens[cols]
+tx2gene_ensembl <- tx2gene_ensembl[c(2,1)]
+head(tx2gene_ensembl)
+
+# ensure hEGFR is present
+look.for <- c("ENST00000275493.7")
+tx2gene_ensembl[tx2gene_ensembl$transcript_id %in% look.for, ]
+
+# Tx to Gene Names
+cols <- names(ens) %in% c("gene_name", "transcript_id")
+tx2gene_symbol <- ens[cols]
+tx2gene_symbol <- tx2gene_symbol[c(2,1)]
+head(tx2gene_symbol)
+
+# ensure hEGFR is present
+look.for <- c("ENSG00000146648.17")
+tx2gene_symbol[tx2gene_symbol$transcript_id %in% look.for, ]
+look.for <- c("hEGFR")
+tx2gene_symbol[tx2gene_symbol$gene_name %in% look.for, ]
+
+# ensure EGFR is present
+look.for <- c("ENST00000275493.7")
+tx2gene_symbol[tx2gene_symbol$transcript_id %in% look.for, ]
+
+# ensure Egfr and Pten are present
+look.for <- c("Egfr", "Pten")
+tx2gene_symbol[tx2gene_symbol$gene_name %in% look.for, ]
+```
+
+### Ensembl ID and gene symbols
+```{r}
+# Get genes symbols
+genes <- tx2gene_symbol$gene_name
+length(genes)
+
+### /Begin Comment out. Run only once to save as RDS object for import upon re-analysis
+#
+# # Get biomarts
+# marts <- listMarts()
+#
+# # Use mart
+# ensembl=useMart("ENSEMBL_MART_ENSEMBL")
+#
+# # Get list of datasets from ensembl
+# ds <- listDatasets(ensembl)
+#
+# # Use Human dataset
+# ensembl_h = useMart("ENSEMBL_MART_ENSEMBL", dataset="hsapiens_gene_ensembl")
+# att_h <- listAttributes(ensembl_h)
+# filt_h <- listFilters(ensembl_h)
+#
+# # Get hEGFR gene from ensembl.
+# hEGFR <-
+#   biomaRt::getBM(
+#   attributes = c("ensembl_gene_id_version",
+#   "entrezgene_id",
+#   "external_gene_name",
+#   "chromosome_name",
+#   "strand",
+#   "start_position",
+#   "end_position",
+#   "description",
+#   "gene_biotype"
+#   ),
+#   filters = "external_gene_name",
+#   values = c("EGFR"),
+#   mart=ensembl_h
+#   )
+#
+# # Save as RDS
+# saveRDS(hEGFR, file = paste0(RNA_output,format(Sys.Date(),"%y%m%d"),"_","hEGFR",".rds"))
+# # Copy RDS to REF Input folder
+# file.copy(from=  paste0(RNA_output, format(Sys.Date(),"%y%m%d"),"_","hEGFR",".rds"),
+#           to = paste0("/Data/Input/RNAseq/Ref/"))
+# # Remove the date
+# file.rename(from=paste0("/Data/Input/RNAseq/Ref/",format(Sys.Date(),"%y%m%d"),"_","hEGFR",".rds"),
+#             to = paste0("/Data/Input/RNAseq/Ref/","hEGFR",".rds"))
+
+### \End Comment Out
+
+# Import hEGFR gene
+hEGFR <- readRDS(file = paste0("/Data/Input/RNAseq/Ref/","hEGFR.rds"))
+
+### /Begin Comment out. Run only once to save as RDS object for import next time
+
+# # Use Marts
+# ensembl_m = useMart("ENSEMBL_MART_ENSEMBL", dataset="mmusculus_gene_ensembl")
+# att_m <- listAttributes(ensembl_m)
+# filt_m <- listFilters(ensembl_m)
+#
+# # Get mouse genes from ensembl
+# genes_mouse <-
+#   biomaRt::getBM(
+#   attributes = c("ensembl_gene_id_version",
+#   "mgi_id",
+#   "mgi_symbol",
+#   "chromosome_name",
+#   "strand",
+#   "start_position",
+#   "end_position",
+#   "description",
+#   "gene_biotype"
+#   ),
+#   filters = "external_gene_name",
+#   values = genes,
+#   mart=ensembl_m
+#   )
+#
+# # Save as RDS
+# saveRDS(genes_mouse, file = paste0(RNA_output,format(Sys.Date(),"%y%m%d"),"_","genes_mouse",".rds"))
+#
+# # Copy RDS to Input folder
+# file.copy(from=  paste0(RNA_output,format(Sys.Date(),"%y%m%d"),"_","genes_mouse",".rds"),
+#           to = "/Data/Input/RNAseq/Ref/")
+#
+# # Remove the date
+# file.rename(from=paste0("/Data/Input/RNAseq/Ref/",format(Sys.Date(),"%y%m%d"),"_","genes_mouse",".rds"),
+#             to = paste0("/Data/Input/RNAseq/Ref/","genes_mouse",".rds"))
+
+# ### \End Comment Out
+
+# Import genes_mouse
+genes_mouse <- readRDS(file = paste0("/Data/Input/RNAseq/Ref/","genes_mouse.rds"))
+
+# Combine hEGFR with mouse genes
+genes_mouse_hEGFR <- rbind(genes_mouse, c("ENSG00000146648.17", "hEGFR", "hEGFR", 7, 1, 55019017, 55211628, "epidermal growth factor receptor", "protein_coding"))
+
+# Summarize
+genes_mouse_hEGFR %>%
+  group_by(gene_biotype) %>%
+  summarize(n=n())
+
+# Remove genes with no symbol
+genes_mouse_hEGFR <- genes_mouse_hEGFR[!(genes_mouse_hEGFR$mgi_id==""),]
+
+# Remove duplicated genes
+genes_mouse_hEGFR_clean <- genes_mouse_hEGFR[!duplicated(genes_mouse_hEGFR), ]
+genes_mouse_hEGFR_duplicated_Ensembl <- genes_mouse_hEGFR_clean[!isUnique(genes_mouse_hEGFR_clean$ensembl_gene_id_version),]
+genes_mouse_hEGFR_duplicated_gene_name <- genes_mouse_hEGFR_clean[!isUnique(genes_mouse_hEGFR_clean$mgi_symbol),]
+gene_id_dup <- as.vector(rownames(genes_mouse_hEGFR_duplicated_Ensembl))
+gene_id_dup
+genes_mouse_hEGFR <- subset(genes_mouse_hEGFR, !(rownames(genes_mouse_hEGFR) %in% gene_id_dup))
+
+# Check dataset for genes
+look.for <- c("Pdgfra", "Egfr", "hEGFR", "Ddr2")
+genes_mouse_hEGFR_clean[genes_mouse_hEGFR_clean$mgi_symbol %in% look.for, ]
+
+# Save genes
+write.csv(genes_mouse_hEGFR_clean, paste0(RNA_output, "genes_mouse_hEGFR.csv"))
+```
+
+### Protein coding genes (PCG)
+Used to filter RNAseq data on PCG
+
+```{r}
+# Subset for pcg
+dim(genes_mouse_hEGFR_clean)
+pcg_mouse_hEGFR <- subset(genes_mouse_hEGFR_clean, genes_mouse_hEGFR_clean$gene_biotype=="protein_coding")
+dim(pcg_mouse_hEGFR)
+
+# Remove "RIKEN" genes by partial string match
+pcg_mouse_hEGFR <- pcg_mouse_hEGFR[!grepl("RIKEN",pcg_mouse_hEGFR$description),]
+dim(pcg_mouse_hEGFR)
+
+# Remove "cDNA sequence" genes by partial string match
+pcg_mouse_hEGFR <- pcg_mouse_hEGFR[!grepl("cDNA sequence",pcg_mouse_hEGFR$description),]
+dim(pcg_mouse_hEGFR)
+
+# Remove "DNA segment" genes by partial string match
+pcg_mouse_hEGFR <- pcg_mouse_hEGFR[!grepl("DNA segment",pcg_mouse_hEGFR$description),]
+dim(pcg_mouse_hEGFR)
+
+# Remove "predicted gene" genes by partial string match
+pcg_mouse_hEGFR <- pcg_mouse_hEGFR[!grepl("predicted gene",pcg_mouse_hEGFR$description),]
+dim(pcg_mouse_hEGFR)
+
+# Remove "MT" chromosomes
+pcg_mouse_hEGFR <- subset(pcg_mouse_hEGFR, pcg_mouse_hEGFR$chromosome_name!="MT")
+dim(pcg_mouse_hEGFR)
+
+# Save pcg_mouse_hEGFR
+saveRDS(pcg_mouse_hEGFR, file = paste0(RNA_output,"pcg_mouse_hEGFR.rds") )
+write.csv(pcg_mouse_hEGFR, file = paste0(RNA_output,"pcg_mouse_hEGFR.csv"))
+
+# Covert to vector and df
+pcg <- as.vector(pcg_mouse_hEGFR$mgi_symbol)
+pcg_df <- as.data.frame(pcg_mouse_hEGFR$mgi_symbol)
+colnames(pcg_df)[1]="pcg"
+```
+
+## Sample metadata
+```{r}
+# Import sequencing datasheet
+RNA_samples <-
+  read.csv(
+    paste0(Data, "Input/RNAseq/RNA_SampleSheet.csv"),
+    header = TRUE,
+    sep = ",",
+    stringsAsFactors = FALSE,
+    row.names = 1
+  )
+
+# Convert to factors
+RNA_samples$time_h <- as.factor(RNA_samples$time_h )
+RNA_samples$samp_replicate <- as.factor(RNA_samples$samp_replicate )
+RNA_samples$drug <- as.factor(RNA_samples$drug )
+RNA_samples$drug_conc_uM <- as.factor(RNA_samples$drug_conc_uM )
+RNA_samples$exp_replicate <- as.factor(RNA_samples$exp_replicate )
+RNA_samples$cell_line_abbr <- as.factor(RNA_samples$cell_line_abbr )
+RNA_samples$project <- as.factor(RNA_samples$project )
+RNA_samples$serum <- as.factor(RNA_samples$serum )
+
+# Check the samplesheet
+str(RNA_samples)
+
+# Save samplesheet
+write.csv(RNA_samples,file = paste0(RNA_output,"RNA_SampleSheet",".csv"))
+
+```
+
+## Generate Baseline dataset
+```{r}
+
+# Add metadata for DE analysis groups. (Model_DrugConc_Time)
+RNA_samples$group <- as.factor(paste0(RNA_samples$cell_line_abbr,"_",RNA_samples$drug_conc_uM,"_", RNA_samples$time_h))
+
+# Add metadata for DE analysis groups. (Serum_Model_DrugConc_Time)
+RNA_samples$serum_group <- as.factor(paste0(RNA_samples$serum,"_",RNA_samples$cell_line_abbr,"_",RNA_samples$drug_conc_uM,"_", RNA_samples$time_h))
+
+# Add metadata EGFR TKI sensitivity status
+RNA_samples$EGFR_TKI_sen <- as.factor(ifelse(RNA_samples$cell_line_abbr %in% c("E4","E5","G1","G5","G8","G12","GR1","GR7"),"Resistant","Sensitive"))
+
+# Extract baseline parental samples
+RNA_samples_bl_Par <- subset(RNA_samples, RNA_samples$cell_line_abbr %in% c("CEv3","C") & RNA_samples$expt_type=="baseline")
+
+# Split by serum status
+RNA_samples_bl_Par_fs <- subset(RNA_samples_bl_Par, RNA_samples_bl_Par$serum=="full")
+RNA_samples_bl_Par_ss <- subset(RNA_samples_bl_Par, RNA_samples_bl_Par$serum=="starve")
+
+# Extract Baseline Res samples
+RNA_samples_bl_Res <- subset(RNA_samples, RNA_samples$cell_line_abbr %in% c("CEv3","E4","E5","G1","G5","G8","G12") & RNA_samples$expt_type=="baseline")
+
+# Split by serum status
+RNA_samples_bl_Res_fs <- subset(RNA_samples_bl_Res, RNA_samples_bl_Res$serum=="full")
+RNA_samples_bl_Res_ss <- subset(RNA_samples_bl_Res, RNA_samples_bl_Res$serum=="starve")
+
+# Baseline RNA subsets
+RNA_samples_bl_Par
+RNA_samples_bl_Par_fs 
+RNA_samples_bl_Par_ss
+RNA_samples_bl_Res_fs
+RNA_samples_bl_Res_ss
+```
+
+Generate Dynamic dataset
+```{r}
+
+# This is the master sample sheet
+RNA_samples_dyn <- RNA_samples
+
+# Extract baseline samples for time 0 by cell line
+RNA_samples_dyn_0_cell_line_abbr <- list()
+for ( i in unique(RNA_samples_dyn$cell_line_abbr)){
+  RNA_samples_dyn_0_cell_line_abbr[[i]] <-
+  subset(RNA_samples_dyn, RNA_samples_dyn$cell_line_abbr==paste0(i) & RNA_samples_dyn$expt_type=="baseline")
+}
+
+# Split extracted samples by serum status
+RNA_samples_dyn_0_cell_line_abbr_serum <- list()
+for (h in seq_along(RNA_samples_dyn_0_cell_line_abbr)){
+for (i in unique(RNA_samples_dyn_0_cell_line_abbr[[h]]$serum)){
+RNA_samples_dyn_0_cell_line_abbr_serum[[paste0(names(RNA_samples_dyn_0_cell_line_abbr)[[h]],"_",i)]] <-
+  subset(RNA_samples_dyn_0_cell_line_abbr[[h]], RNA_samples_dyn_0_cell_line_abbr[[h]]$serum==paste0(i))
+}
+}
+
+# Afatinib Subset
+RNA_samples_dyn_afatinib <- subset(RNA_samples_dyn, RNA_samples_dyn$drug=="afatinib")
+RNA_samples_dyn_afatinib_cell_line_abbr <- list()
+for ( i in unique(RNA_samples_dyn_afatinib$cell_line_abbr)){
+  RNA_samples_dyn_afatinib_cell_line_abbr[[i]] <-
+  subset(RNA_samples_dyn_afatinib, RNA_samples_dyn_afatinib$cell_line_abbr==paste0(i))
+}
+
+# Split Afatinib Subset by serum
+RNA_samples_dyn_afatinib_cell_line_abbr_serum <- list()
+for (h in seq_along(RNA_samples_dyn_afatinib_cell_line_abbr)){
+for (i in unique(RNA_samples_dyn_afatinib_cell_line_abbr[[h]]$serum)){
+RNA_samples_dyn_afatinib_cell_line_abbr_serum[[paste0(names(RNA_samples_dyn_afatinib_cell_line_abbr)[[h]],"_",i)]] <-
+  subset(RNA_samples_dyn_afatinib_cell_line_abbr[[h]], RNA_samples_dyn_afatinib_cell_line_abbr[[h]]$serum==paste0(i))
+}
+}
+RNA_samples_dyn_afatinib_cell_line_abbr_serum
+
+# Bind Afatinib dynamic with baseline
+RNA_samples_dyn_0_cell_line_abbr_serum # All baseline samples split by serum status
+RNA_samples_dyn_afatinib_cell_line_abbr_serum # All afatinib dynamic samples split by serum status
+
+for (i in seq_along(RNA_samples_dyn_afatinib_cell_line_abbr_serum)){
+ RNA_samples_dyn_afatinib_cell_line_abbr_serum[[i]]<-
+   rbind(RNA_samples_dyn_afatinib_cell_line_abbr_serum[[i]], RNA_samples_dyn_0_cell_line_abbr_serum[[paste0(names(RNA_samples_dyn_afatinib_cell_line_abbr_serum)[[i]])]])
+}
+RNA_samples_dyn_afatinib_cell_line_abbr_serum
+
+
+# neratinib Subset
+RNA_samples_dyn_neratinib <- subset(RNA_samples_dyn, RNA_samples_dyn$drug=="neratinib")
+RNA_samples_dyn_neratinib_cell_line_abbr <- list()
+for ( i in unique(RNA_samples_dyn_neratinib$cell_line_abbr)){
+  RNA_samples_dyn_neratinib_cell_line_abbr[[i]] <-
+  subset(RNA_samples_dyn_neratinib, RNA_samples_dyn_neratinib$cell_line_abbr==paste0(i))
+}
+
+# Split neratinib subset by dose
+RNA_samples_dyn_neratinib_cell_line_abbr_dose <- list()
+for ( h in seq_along(RNA_samples_dyn_neratinib_cell_line_abbr)){
+for ( i in unique(RNA_samples_dyn_neratinib_cell_line_abbr[[h]]$drug_conc_uM)){
+RNA_samples_dyn_neratinib_cell_line_abbr_dose[[paste0(names(RNA_samples_dyn_neratinib_cell_line_abbr)[[h]],"_",i)]] <-
+  subset(RNA_samples_dyn_neratinib_cell_line_abbr[[h]],RNA_samples_dyn_neratinib_cell_line_abbr[[h]]$drug_conc_uM==paste0(i))
+}
+}
+RNA_samples_dyn_neratinib_cell_line_abbr_dose
+
+# Split neratinib Subset by serum
+RNA_samples_dyn_neratinib_cell_line_abbr_dose_serum <- list()
+for (h in seq_along(RNA_samples_dyn_neratinib_cell_line_abbr_dose)){
+for (i in unique(RNA_samples_dyn_neratinib_cell_line_abbr_dose[[h]]$serum)){
+RNA_samples_dyn_neratinib_cell_line_abbr_dose_serum[[paste0(names(RNA_samples_dyn_neratinib_cell_line_abbr_dose)[[h]],"_",i)]] <-
+  subset(RNA_samples_dyn_neratinib_cell_line_abbr_dose[[h]], RNA_samples_dyn_neratinib_cell_line_abbr_dose[[h]]$serum==paste0(i))
+}
+}
+RNA_samples_dyn_neratinib_cell_line_abbr_dose_serum
+
+# Bind neratinib DF with 0
+RNA_samples_dyn_0_cell_line_abbr_serum # All baseline samples split by serum status
+RNA_samples_dyn_neratinib_cell_line_abbr_dose_serum # All neratinib dynamic samples split by dose and serum status
+
+for (i in seq_along(RNA_samples_dyn_neratinib_cell_line_abbr_dose_serum)){
+ RNA_samples_dyn_neratinib_cell_line_abbr_dose_serum[[i]]<-
+   rbind(RNA_samples_dyn_neratinib_cell_line_abbr_dose_serum[[i]], RNA_samples_dyn_0_cell_line_abbr_serum[[paste0(sapply(strsplit(paste0(names(RNA_samples_dyn_neratinib_cell_line_abbr_dose_serum)[[i]]), "_"), '[',1),"_",
+sapply(strsplit(paste0(names(RNA_samples_dyn_neratinib_cell_line_abbr_dose_serum)[[i]]), "_"), '[',3))]])
+}
+RNA_samples_dyn_neratinib_cell_line_abbr_dose_serum
+
+
+# JQ1 Subset
+RNA_samples_dyn_JQ1 <- subset(RNA_samples_dyn, RNA_samples_dyn$drug=="JQ1")
+RNA_samples_dyn_JQ1_cell_line_abbr <- list()
+for ( i in unique(RNA_samples_dyn_JQ1$cell_line_abbr)){
+  RNA_samples_dyn_JQ1_cell_line_abbr[[i]] <-
+  subset(RNA_samples_dyn_JQ1, RNA_samples_dyn_JQ1$cell_line_abbr==paste0(i))
+}
+
+# Split JQ1 subset by dose
+RNA_samples_dyn_JQ1_cell_line_abbr_dose <- list()
+for ( h in seq_along(RNA_samples_dyn_JQ1_cell_line_abbr)){
+for ( i in unique(RNA_samples_dyn_JQ1_cell_line_abbr[[h]]$drug_conc_uM)){
+RNA_samples_dyn_JQ1_cell_line_abbr_dose[[paste0(names(RNA_samples_dyn_JQ1_cell_line_abbr)[[h]],"_",i)]] <-
+  subset(RNA_samples_dyn_JQ1_cell_line_abbr[[h]],RNA_samples_dyn_JQ1_cell_line_abbr[[h]]$drug_conc_uM==paste0(i))
+}
+}
+RNA_samples_dyn_JQ1_cell_line_abbr_dose
+
+# Split JQ1 Subset by serum
+RNA_samples_dyn_JQ1_cell_line_abbr_dose_serum <- list()
+for (h in seq_along(RNA_samples_dyn_JQ1_cell_line_abbr_dose)){
+for (i in unique(RNA_samples_dyn_JQ1_cell_line_abbr_dose[[h]]$serum)){
+RNA_samples_dyn_JQ1_cell_line_abbr_dose_serum[[paste0(names(RNA_samples_dyn_JQ1_cell_line_abbr_dose)[[h]],"_",i)]] <-
+  subset(RNA_samples_dyn_JQ1_cell_line_abbr_dose[[h]], RNA_samples_dyn_JQ1_cell_line_abbr_dose[[h]]$serum==paste0(i))
+}
+}
+RNA_samples_dyn_JQ1_cell_line_abbr_dose_serum
+
+# Bind JQ1 DF with 0
+RNA_samples_dyn_0_cell_line_abbr_serum # All baseline samples split by serum status
+RNA_samples_dyn_JQ1_cell_line_abbr_dose_serum # All JQ1 dynamic samples split by dose and serum status
+
+for (i in seq_along(RNA_samples_dyn_JQ1_cell_line_abbr_dose_serum)){
+ RNA_samples_dyn_JQ1_cell_line_abbr_dose_serum[[i]]<-
+   rbind(RNA_samples_dyn_JQ1_cell_line_abbr_dose_serum[[i]],
+RNA_samples_dyn_0_cell_line_abbr_serum[[paste0(sapply(strsplit(paste0(names(RNA_samples_dyn_JQ1_cell_line_abbr_dose_serum)[[i]]), "_"), '[',1),"_",
+sapply(strsplit(paste0(names(RNA_samples_dyn_JQ1_cell_line_abbr_dose_serum)[[i]]), "_"), '[',3))]])
+}
+RNA_samples_dyn_JQ1_cell_line_abbr_dose_serum
+
+# Merge all drug subsets into 1 list for impulse
+RNA_samples_dyn_afatinib_cell_line_abbr_serum
+RNA_samples_dyn_neratinib_cell_line_abbr_dose_serum
+RNA_samples_dyn_JQ1_cell_line_abbr_dose_serum
+
+RNA_samples_dyn_AllGroups <- list()
+for (x in seq_along(RNA_samples_dyn_afatinib_cell_line_abbr_serum)){
+  RNA_samples_dyn_AllGroups[[paste0("Afat_", names(RNA_samples_dyn_afatinib_cell_line_abbr_serum)[[x]])]] <-
+    RNA_samples_dyn_afatinib_cell_line_abbr_serum[[x]]
+  for (y in seq_along(RNA_samples_dyn_neratinib_cell_line_abbr_dose_serum)){
+    RNA_samples_dyn_AllGroups[[paste0("Ner_", names(RNA_samples_dyn_neratinib_cell_line_abbr_dose_serum)[[y]])]] <-
+      RNA_samples_dyn_neratinib_cell_line_abbr_dose_serum[[y]]
+    for (z in seq_along(RNA_samples_dyn_JQ1_cell_line_abbr_dose_serum)){
+      RNA_samples_dyn_AllGroups[[paste0("JQ1_", names(RNA_samples_dyn_JQ1_cell_line_abbr_dose_serum)[[z]])]] <-
+        RNA_samples_dyn_JQ1_cell_line_abbr_dose_serum[[z]]
+}
+}
+}
+
+```
+
+
+## Afat Dyn Groups
+```{r}
+# RNA_samples_dyn
+
+RNA_samples_Afat_Res_fs <- rbind(subset(RNA_samples_dyn,RNA_samples_dyn$cell_line_abbr %in% c("CEv3","E4","E5","G1","G5","G8","G12") & RNA_samples_dyn$expt_type=="baseline" & RNA_samples_dyn$serum=="full"),subset(RNA_samples_dyn,RNA_samples_dyn$cell_line_abbr %in% c("CEv3","E4","E5","G1","G5","G8","G12") & RNA_samples_dyn$expt_type=="dynamic" & RNA_samples_dyn$serum=="full" & RNA_samples_dyn$drug=="afatinib"))
+
+RNA_samples_Afat_Res_ss <- rbind(subset(RNA_samples_dyn,RNA_samples_dyn$cell_line_abbr %in% c("CEv3","E4","E5","G1","G5","G8","G12") & RNA_samples_dyn$expt_type=="baseline" & RNA_samples_dyn$serum=="starve"),subset(RNA_samples_dyn,RNA_samples_dyn$cell_line_abbr %in% c("CEv3","E4","E5","G1","G5","G8","G12") & RNA_samples_dyn$expt_type=="dynamic" & RNA_samples_dyn$serum=="starve" & RNA_samples_dyn$drug=="afatinib"))
+
+RNA_samples_Afat_Res <- rbind(RNA_samples_Afat_Res_fs,RNA_samples_Afat_Res_ss)
+```
+
+```{r}
+# Samples to create DDS
+# RNA_samples
+
+# List containing all subsets
+RNA_samples_subset <- 
+  c(RNA_samples_dyn_AllGroups,
+  list(
+    bl_Par=RNA_samples_bl_Par,
+    bl_Par_fs=RNA_samples_bl_Par_fs, 
+    bl_Par_ss=RNA_samples_bl_Par_ss,
+    bl_Res_fs=RNA_samples_bl_Res_fs,
+    bl_Res_ss=RNA_samples_bl_Res_ss,
+    Afat_Res_fs=RNA_samples_Afat_Res_fs,
+    Afat_Res_ss=RNA_samples_Afat_Res_ss,
+    Afat_Res=RNA_samples_Afat_Res))
+```
+
+## Complete dataset
+## RNAseq data
+```{r}
+# Get Salmon (sf) files to import
+files_sf <- paste0(Data,"/Input/RNAseq/SF/", RNA_samples$sf_file)
+files <- as.data.frame(files_sf)
+
+# Save list of sf files
+write.csv(files, paste0(RNA_output,"sf_files.csv"))
+
+# txi import
+system.time(txi <- tximport(files_sf, type = "salmon", tx2gene = tx2gene_symbol))
+names(txi)
+head(txi$counts, 2)
+
+# Ensure the rownames of samples align with the colnames of txi$counts, if there are colnames.
+all(colnames(txi$counts) == rownames(RNA_samples))
+
+# counts to df
+data <- as.data.frame(txi$counts)
+
+# Save RDA of raw counts
+save(data, file = paste0(RNA_output,format(Sys.Date(),"%y%m%d"),"_RNA_Counts.RData"))
+
+# Spot check genes of interest (GOI) for reads
+look.for <- c("Egfr", "Pten", "hEGFR")
+data[rownames(data) %in% look.for, ]
+```
+
+### dds_all
+#### Directories
+```{r}
+# Directories for dds_all
+dir.create(paste0(RNA_graphs,"dds_all"))
+dir.create(paste0(RNA_output,"dds_all"))
+graph_dir <- paste0(RNA_graphs,"dds_all/")
+output_dir <- paste0(RNA_output,"dds_all/")
+```
+
+#### Build DDS
+```{r}
+# Create dds
+dds_all <- DESeqDataSetFromTximport(
+  txi,
+  RNA_samples,
+  design = ~ serum_group)
+
+# Estimate size factors
+dds_all <- estimateSizeFactors(dds_all)
+```
+
+### Filter dds
+Filter out genes with low counts and non-protein coding genes
+
+#### Directories
+```{r}
+# Directories for dds_filter
+dir.create(paste0(RNA_graphs,"dds_filter"))
+dir.create(paste0(RNA_output,"dds_filter"))
+graph_dir <- paste0(RNA_graphs,"dds_filter/")
+output_dir <- paste0(RNA_output,"dds_filter/")
+```
+
+#### Filter genes
+```{r}
+# filter out genes where fewer than 3 samples have read counts greater than 5
+# keep genes where at least 3 samples have counts greater than five
+idx <- rowSums( counts(dds_all, normalized=TRUE)>5)>=3
+dds_filter <- dds_all[idx,]
+nrow(dds_filter)
+
+# filter for PCG only
+dds_filter <- dds_filter[row.names(dds_filter) %in% pcg]
+nrow(dds_filter)
+head(colData(dds_filter))
+
+# Estimate size factors
+dds_filter <- estimateSizeFactors(dds_filter)
+
+# Extract sample data
+samples_filter <- as.data.frame(colData(dds_filter))
+
+# Save dds_filter as RDS
+saveRDS(dds_filter, file = paste0(output_dir,format(Sys.Date(),"%y%m%d"),"_","dds_filter",".rds"))
+
+#Save raw and norm counts after filtering
+norm_counts <- as.data.frame(counts(dds_filter, normalized=TRUE))
+raw_counts <- as.data.frame(counts(dds_filter, normalized=FALSE))
+
+write.csv(
+  norm_counts,
+  file=paste0(output_dir,"norm_counts",".csv"),
+  row.names = TRUE
+  )
+
+write.csv(
+  raw_counts,
+  file=paste0(output_dir,"raw_counts",".csv"),
+  row.names = TRUE
+  )
+
+# Graphics termination
+if(!is.null(dev.list())) dev.off()
+if(!is.null(dev.list())) graphics.off()
+```
+
+#### VST
+```{r}
+# dds_filter
+
+# transform filtered data using vst
+vsd<-vst(dds_filter, blind=T, nsub=1000, fitType = "parametric")
+head(assay(vsd),3)
+```
+
+#### PCA
+```{r}
+# vsd top 500 genes for PCA
+ntop <- 500
+rv <- rowVars(assay(vsd))
+select <- order(rv, decreasing = TRUE)[seq_len(min(ntop, length(rv)))]
+vsd_500 <- vsd[select, ]
+
+# Create pca object
+pcaData <- PCAtools::pca(assay(vsd_500), metadata = colData(vsd))
+
+# Save pca data
+write.csv(pcaData$rotated, file =paste0(output_dir,"pcaData","_vsd_500",".csv"))
+
+# Set colors
+color_vector <-
+  c(
+    'C' = 'black',
+    'CEv3' = 'red',
+    'E4' = 'deepskyblue4',
+    'E5' = 'turquoise3',
+    'G1' = 'purple4',
+    'G5' = 'mediumorchid',
+    'G8' = 'deeppink',
+    'G12' = 'pink2'
+  )
+
+# plot 5 pricipal components in a pairsplot
+pairsplot <- pairsplot(pcaData,
+    components = getComponents(pcaData, c(1:5)),
+    triangle = TRUE, trianglelabSize = 12,
+    hline = 0, vline = 0,
+    pointSize = 0.4,
+    gridlines.major = FALSE, gridlines.minor = FALSE,
+    colby = 'cell_line_abbr',
+    colkey= color_vector,
+    title = 'Pairs plot', plotaxes = FALSE,
+    legendPosition = 'none',
+    margingaps = unit(c(-0.01, -0.01, -0.01, -0.01), 'cm'))
+pairsplot
+# save graph as PDF
+ggsave(
+  filename = paste0(graph_dir,"pca_vsd_500_","pairsplot", ".pdf"),
+  plot = pairsplot
+  )
+
+# PCA 1
+p1 <- biplot(pcaData, x = "PC1", y = "PC2",
+       lab = NULL ,
+       colby = "cell_line_abbr",
+       shape = "serum",
+       colkey= color_vector,
+       legendPosition = 'right' )
+p1
+# save graph as PDF
+ggsave(
+  filename = paste0(graph_dir,"pca_vsd_500_","cell_line",".pdf"),
+  plot = p1
+  )
+```
+
+#### Euclidian distances
+```{r}
+# calculate sample euclidian distances
+sampleDists <- dist(t(assay(vsd)))
+
+# plot sample euclidian distances via a heatmap
+sampleDistMatrix <- as.matrix( sampleDists )
+
+# Complex Heatmap annotation labels
+annotation_col<-
+  HeatmapAnnotation(df = data.frame(Model = vsd@colData$cell_line_abbr,
+                                    Serum = vsd@colData$serum),
+  col = list(Model =
+  c(
+    'C' = 'black',
+    'CEv3' = 'red',
+    'E4' = 'deepskyblue4',
+    'E5' = 'turquoise3',
+    'G1' = 'purple4',
+    'G5' = 'mediumorchid',
+    'G8' = 'deeppink',
+    'G12' = 'pink2'
+  ),
+  Serum =
+    c("full"='firebrick',
+      "starve"='royalblue'
+      )
+  ))
+
+# Heatmap of euclidian distances
+ComplexHeatmap::Heatmap(
+      sampleDistMatrix,
+      name = " ",
+      column_title = "Euclidian Distances",
+      show_column_names = FALSE,
+      show_row_names = FALSE,
+      clustering_distance_rows = "euclidean",
+      clustering_distance_columns = "euclidean",
+      clustering_method_rows = "complete",
+      clustering_method_columns = "complete",
+      col = colorRampPalette( rev(brewer.pal(9, "Blues")) )(255),
+      top_annotation = annotation_col
+    )
+```
+
+## RNAseq EDA
+### dds_EDA_subset
+#### Directories
+```{r}
+# Directories for dds_Bl_Par
+dir.create(paste0(RNA_graphs,"dds_EDA_subset"))
+dir.create(paste0(RNA_output,"dds_EDA_subset"))
+graph_dir <- paste0(RNA_graphs,"dds_EDA_subset/")
+output_dir <- paste0(RNA_output,"dds_EDA_subset/")
+```
+
+#### Subset
+```{r}
+# List of sample sheet subsets for EDA
+# RNA_samples_subset
+
+# Save sample sheet
+for (i in seq_along(RNA_samples_subset)){
+  dir.create(paste0(graph_dir,names(RNA_samples_subset)[i]))
+  dir.create(paste0(output_dir,names(RNA_samples_subset)[i]))
+  write.csv(RNA_samples_subset[[i]], file=paste0(output_dir,names(RNA_samples_subset)[i],"/RNA_samples",".csv"))
+}
+
+# Generate DDS
+dds_EDA_ls <- list()
+for (i in seq_along(RNA_samples_subset)){
+  dds_EDA_ls[[names(RNA_samples_subset)[i]]] <-
+    dds_filter[,row.names(RNA_samples_subset[[names(RNA_samples_subset)[i]]])]
+  
+  dds_EDA_ls[[names(RNA_samples_subset)[i]]] <- DESeqDataSet(dds_EDA_ls[[names(RNA_samples_subset)[i]]], design = ~ serum_group)
+  
+  # Estimate size factors
+  dds_EDA_ls[[names(RNA_samples_subset)[i]]] <- estimateSizeFactors(dds_EDA_ls[[names(RNA_samples_subset)[i]]])
+  
+  # Save as RDS
+  saveRDS(dds_EDA_ls[[names(RNA_samples_subset)[i]]], file = paste0(output_dir,names(RNA_samples_subset)[i],"/",format(Sys.Date(),"%y%m%d"),"_",names(RNA_samples_subset)[i],".rds"))
+  
+  # Save raw and norm counts
+  norm_counts <- as.data.frame(counts(dds_EDA_ls[[names(RNA_samples_subset)[i]]], normalized=TRUE))
+  raw_counts <- as.data.frame(counts(dds_EDA_ls[[names(RNA_samples_subset)[i]]], normalized=FALSE))
+
+  write.csv(
+  norm_counts,
+  file=paste0(output_dir,names(RNA_samples_subset)[i],"/","norm_counts",".csv"),
+  row.names = TRUE
+  )
+
+  write.csv(
+  raw_counts,
+  file=paste0(output_dir,names(RNA_samples_subset)[i],"/","raw_counts",".csv"),
+  row.names = TRUE
+  )
+}
+
+
+# Save list of DDS objects
+saveRDS(dds_EDA_ls, file = paste0(output_dir,format(Sys.Date(),"%y%m%d"),"_","dds_EDA_ls",".rds"))
+```
+
+#### VST
+```{r, fig.keep='first'}
+
+vsd_ls <- list()
+ntd_ls <- list()
+
+for (i in seq_along(dds_EDA_ls)){
+  
+  # transform filtered data using vst
+  vsd_ls[[names(dds_EDA_ls)[i]]]<-
+    vst(dds_EDA_ls[[i]], blind=T, nsub=1000, fitType = "parametric")
+  
+  # meanSDplot of vst
+  pdf(file=paste0(graph_dir,names(dds_EDA_ls)[i],"/","meanSDplot","_vsd",".pdf"))
+  vsn::meanSdPlot(assay(vsd_ls[[names(dds_EDA_ls)[i]]]))
+  dev.off()
+  
+  # normTransform log2(x+1) ntd
+   ntd_ls[[names(dds_EDA_ls)[i]]] <-
+    normTransform(dds_EDA_ls[[i]], f = log2, pc = 1)
+   
+  # meanSDplot of ntd 
+  pdf(file=paste0(graph_dir,names(dds_EDA_ls)[i],"/","meanSDplot","_ntd",".pdf"))
+  vsn::meanSdPlot(assay(ntd_ls[[names(dds_EDA_ls)[i]]]))
+  dev.off()
+  
+  
+  # meanSDplot of normCounts
+  pdf(file=paste0(graph_dir,names(dds_EDA_ls)[i],"/","meanSDplot","_normCounts",".pdf"))
+  vsn::meanSdPlot(as.matrix(DESeq2::counts(dds_EDA_ls[[i]],normalized=TRUE)))
+  dev.off()
+  
+  # meanSDplot of raw counts
+  pdf(file=paste0(graph_dir,names(dds_EDA_ls)[i],"/","meanSDplot","_rawCounts",".pdf"))
+  vsn::meanSdPlot(as.matrix(DESeq2::counts(dds_EDA_ls[[i]],normalized= FALSE)))
+  dev.off()
+    }
+
+# Save results
+saveRDS(vsd_ls, file = paste0(output_dir,format(Sys.Date(),"%y%m%d"),"_","vsd_ls",".rds"))
+saveRDS(ntd_ls, file = paste0(output_dir,format(Sys.Date(),"%y%m%d"),"_","ntd_ls",".rds"))
+
+```
+
+#### PCA
+```{r, fig.keep='first'}
+
+for(i in seq_along(vsd_ls)){
+  
+  # Directories
+  PCA_graph <- paste0(graph_dir,names(vsd_ls)[i],"/")
+  PCA_output <- paste0(output_dir,names(vsd_ls)[i],"/")
+  
+  # Extract single
+  vsd <- vsd_ls[[i]]
+  
+  # vsd top 500 genes for PCA
+  ntop <- 500
+  rv <- rowVars(assay(vsd))
+  select <- order(rv, decreasing = TRUE)[seq_len(min(ntop, length(rv)))]
+  vsd_500 <- vsd[select, ]
+  
+  # Create pca object
+  pcaData <- PCAtools::pca(assay(vsd_500), metadata = colData(vsd))
+  
+  # Save pca data
+  write.csv(pcaData$rotated, file =paste0(PCA_output,"pcaData","_vsd_500",".csv"))
+  
+  # Set colors
+  color_vector <-
+    c(
+    'C' = 'black',
+    'CEv3' = 'red',
+    'E4' = 'deepskyblue4',
+    'E5' = 'turquoise3',
+    'G1' = 'purple4',
+    'G5' = 'mediumorchid',
+    'G8' = 'deeppink',
+    'G12' = 'pink2'
+    )
+  
+  # plot 5 pricipal components in a pairsplot
+  pairsplot <- pairsplot(pcaData,
+      components = getComponents(pcaData, c(1:5)),
+      triangle = TRUE, trianglelabSize = 12,
+      hline = 0, vline = 0,
+      pointSize = 0.4,
+      gridlines.major = FALSE, gridlines.minor = FALSE,
+      colby = 'group',
+      #colkey= color_vector,
+      title = 'Pairs plot', plotaxes = FALSE,
+      legendPosition = 'none',
+      margingaps = unit(c(-0.01, -0.01, -0.01, -0.01), 'cm'))
+  pairsplot
+  # save graph as PDF
+  ggsave(
+    filename = paste0(PCA_graph,"pca_vsd_500_","pairsplot", ".pdf"),
+    plot = pairsplot
+    )
+  
+  # PCA 1
+  p1 <- biplot(pcaData, x = "PC1", y = "PC2",
+         lab = NULL ,
+         colby = "group",
+         #colkey= color_vector,
+         shape = "time_h",
+         legendPosition = 'right' )
+  p1
+  # save graph as PDF
+  ggsave(
+    filename = paste0(PCA_graph,"pca_vsd_500_","cell_line",".pdf"),
+    plot = p1
+    )
+  
+}
+# Graphics termination 
+if(!is.null(dev.list())) dev.off()
+if(!is.null(dev.list())) graphics.off()
+```
+
+
+#### Euclidian distances
+```{r, fig.keep='first'}
+system.time(
+for(i in seq_along(vsd_ls)){
+  
+  # Directories
+  Euclidian_graph <- paste0(graph_dir,names(vsd_ls)[i],"/")
+  Euclidian_output <- paste0(output_dir,names(vsd_ls)[i],"/")
+  
+  # Extract single
+  vsd <- vsd_ls[[i]]
+
+# calculate sample euclidian distances
+sampleDists <- dist(t(assay(vsd)))
+
+# plot sample euclidian distances via a heatmap
+sampleDistMatrix <- as.matrix( sampleDists )
+
+# Complex Heatmap annotation labels
+annotation_col<-
+  HeatmapAnnotation(df = data.frame(Model = vsd@colData$cell_line_abbr,
+                                    Serum = vsd@colData$serum,
+                                    Time = vsd@colData$time_h),
+  col = list(Model =
+  c(
+    'C' = 'black',
+    'CEv3' = 'red',
+    'E4' = 'deepskyblue4',
+    'E5' = 'turquoise3',
+    'G1' = 'purple4',
+    'G5' = 'mediumorchid',
+    'G8' = 'deeppink',
+    'G12' = 'pink2'
+  ),
+  Serum =
+    c("full"='firebrick',
+      "starve"='royalblue'
+      ),
+  Time =
+    c(
+    '0' = 'black',
+    '4' = 'purple',
+    '24' = 'darkgreen',
+    '48' = 'darkorange'
+      )
+  ))
+
+# Heatmap of euclidian distances
+ed_heatmap <-
+  ComplexHeatmap::Heatmap(
+      sampleDistMatrix,
+      name = " ",
+      column_title = "Euclidian Distances",
+      show_column_names = FALSE,
+      show_row_names = FALSE,
+      clustering_distance_rows = "euclidean",
+      clustering_distance_columns = "euclidean",
+      clustering_method_rows = "complete",
+      clustering_method_columns = "complete",
+      col = colorRampPalette( rev(brewer.pal(9, "Blues")) )(255),
+      top_annotation = annotation_col
+    )
+
+pdf(file=paste0(Euclidian_graph,"Euclidian_distance",".pdf"))
+draw(ed_heatmap)
+dev.off()
+
+}
+)
+
+# Graphics termination 
+if(!is.null(dev.list())) dev.off()
+if(!is.null(dev.list())) graphics.off()
+```
+
+
+```{r}
+# Load necessary libraries
+# library(parallel)
+# library(ComplexHeatmap)
+# library(RColorBrewer)
+
+# Define the function that will run for each item in vsd_ls
+process_vsd <- function(i, vsd_ls, graph_dir, output_dir) {
+  # Directories
+  Euclidian_graph <- paste0(graph_dir, names(vsd_ls)[i], "/")
+  Euclidian_output <- paste0(output_dir, names(vsd_ls)[i], "/")
+  
+  # Extract single vsd object
+  vsd <- vsd_ls[[i]]
+
+  # Calculate sample Euclidean distances
+  sampleDists <- dist(t(assay(vsd)))
+
+  # Convert to matrix
+  sampleDistMatrix <- as.matrix(sampleDists)
+
+  # Complex Heatmap annotation labels
+  annotation_col <- HeatmapAnnotation(
+    df = data.frame(
+      Model = vsd@colData$cell_line_abbr,
+      Serum = vsd@colData$serum,
+      Time = vsd@colData$time_h
+    ),
+    col = list(
+      Model = c(
+        'C' = 'black',
+        'CEv3' = 'red',
+        'E4' = 'deepskyblue4',
+        'E5' = 'turquoise3',
+        'G1' = 'purple4',
+        'G5' = 'mediumorchid',
+        'G8' = 'deeppink',
+        'G12' = 'pink2'
+      ),
+      Serum = c("full" = 'firebrick', "starve" = 'royalblue'),
+      Time = c('0' = 'black', '4' = 'purple', '24' = 'darkgreen', '48' = 'darkorange')
+    )
+  )
+
+  # Heatmap of Euclidean distances
+  ed_heatmap <- ComplexHeatmap::Heatmap(
+    sampleDistMatrix,
+    name = " ",
+    column_title = "Euclidean Distances",
+    show_column_names = FALSE,
+    show_row_names = FALSE,
+    clustering_distance_rows = "euclidean",
+    clustering_distance_columns = "euclidean",
+    clustering_method_rows = "complete",
+    clustering_method_columns = "complete",
+    col = colorRampPalette(rev(brewer.pal(9, "Blues")))(255),
+    top_annotation = annotation_col
+  )
+
+  # Save the heatmap to a PDF file
+  pdf(file = paste0(Euclidian_graph, "Euclidean_distance", ".pdf"))
+  draw(ed_heatmap)
+  dev.off()
+}
+
+# Create a function to process all elements in parallel
+process_all_vsd <- function(vsd_ls, graph_dir, output_dir) {
+  # Set the number of cores for parallel processing
+  num_cores <- detectCores() - 1  # Use one less core than available
+
+  # Use mclapply for Unix-based systems (Linux/macOS)
+  results <- mclapply(seq_along(vsd_ls), 
+                      process_vsd, 
+                      vsd_ls = vsd_ls, 
+                      graph_dir = graph_dir, 
+                      output_dir = output_dir, 
+                      mc.cores = num_cores)
+  
+  return(results)
+}
+
+# Run Function
+system.time(process_all_vsd(vsd_ls, graph_dir, output_dir))
+```
+
+#### TVG (labeled)
+```{r, fig.keep='first'}
+# dds_EDA_ls
+
+for (h in seq_along(vsd_ls)){
+
+  # Extract one  
+vsd <- vsd_ls[[h]]
+
+# Directories 
+dir.create(paste0(output_dir,names(vsd_ls)[h],"/","Heatmap_TVG"))
+output_dir_Heatmap_TVG <- paste0(output_dir,names(vsd_ls)[h],"/","Heatmap_TVG/")
+dir.create(paste0(graph_dir,names(vsd_ls)[h],"/","Heatmap_TVG"))
+graph_dir_Heatmap_TVG <- paste0(graph_dir,names(vsd_ls)[h],"/","Heatmap_TVG/")
+
+# pHeatmap of Top X DEG on transformed data
+tvg <- c(100,50,25)
+topVarGenesX_list <- list()
+
+# pHeatmap of Top X DEG on transformed data
+
+# Extract out distances
+mat_list <- list()
+for (i in seq_along(tvg)) {
+  topVarGenesX_list[[paste0(tvg[i])]] <- head( order( rowVars( as.matrix(assay(vsd)) ), decreasing=TRUE ), tvg[[i]] )
+}
+for (i in seq_along(tvg)) {
+  mat_list[[paste0(tvg[i])]] <- assay(vsd)[ topVarGenesX_list[[i]], ]
+}
+
+# Heatmap annotation labels
+annotation_col<-
+  HeatmapAnnotation(df = data.frame(Model = vsd@colData$cell_line_abbr,
+                                    Serum = vsd@colData$serum,
+                                    Time = vsd@colData$time_h),
+  col = list(Model =
+  c(
+    'C' = 'black',
+    'CEv3' = 'red',
+    'E4' = 'deepskyblue4',
+    'E5' = 'turquoise3',
+    'G1' = 'purple4',
+    'G5' = 'mediumorchid',
+    'G8' = 'deeppink',
+    'G12' = 'pink2'
+  ),
+  Serum =
+    c("full"='firebrick',
+      "starve"='royalblue'
+      ),
+  Time =
+    c(
+    '0' = 'black',
+    '4' = 'purple',
+    '24' = 'darkgreen',
+    '48' = 'darkorange'
+      )
+  ))
+
+# Generate Unlabeled Heatmap
+p_list <- list()
+for (i in seq_along(mat_list)) {
+p_list[[paste0(names(mat_list)[[i]])]] <- ComplexHeatmap::Heatmap(
+  t(scale(t(mat_list[[i]]))),
+  top_annotation = annotation_col,
+  name = " ",
+  column_title = paste0(names(mat_list)[i],"_TVG"),
+  show_column_names = F,
+  show_row_names = F
+  )
+print(p_list[[i]])
+}
+
+# Save Heatmap
+for (i in seq_along(p_list)) {
+pdf(file=paste0(graph_dir_Heatmap_TVG, "CHeatmap_"  , names(p_list)[[i]], ".pdf"))
+draw(p_list[[i]])
+dev.off()
+}
+
+
+# Generate labeled Heatmap
+p_list <- list()
+for (i in seq_along(mat_list)) {
+p_list[[paste0(names(mat_list)[[i]])]] <- ComplexHeatmap::Heatmap(
+  t(scale(t(mat_list[[i]]))),
+  column_order=row.names(vsd@colData[order(vsd@colData$group),]),
+  top_annotation = annotation_col,
+  column_split = factor(vsd@colData$group),
+  name = " ",
+  column_title = paste0(names(mat_list)[i],"_TVG"),
+  show_column_names = T,
+  show_row_names = T
+  )
+print(p_list[[i]])
+}
+
+# Save Heatmap
+for (i in seq_along(p_list)) {
+pdf(file=paste0(graph_dir_Heatmap_TVG, "CHeatmapLabel_"  , names(p_list)[[i]], ".pdf"))
+draw(p_list[[i]])
+dev.off()
+}
+
+# Graphics termination 
+if(!is.null(dev.list())) dev.off()
+if(!is.null(dev.list())) graphics.off()
+}
+```
+
+#### Genes of Interest (GOI)
+This chunk will extract the normalized mRNA counts from DESeq2 for GOI
+
+##### normCounts
+```{r, fig.keep='first'}
+
+#     user   system  elapsed 
+# 3908.319   21.585 4791.169 
+
+system.time(for (h in seq_along(dds_EDA_ls)){
+
+# Directories for normCounts
+dir.create(paste0(output_dir,names(dds_EDA_ls)[h],"/","normCounts"))
+output_dir_normCounts <- paste0(output_dir,names(dds_EDA_ls)[h],"/","normCounts/")
+dir.create(paste0(graph_dir,names(dds_EDA_ls)[h],"/","normCounts"))
+graph_dir_normCounts <- paste0(graph_dir,names(dds_EDA_ls)[h],"/","normCounts/")
+
+dds_normCounts <- dds_EDA_ls[[h]]
+
+# dds_normCounts
+norm_counts <- as.data.frame(counts(dds_normCounts, normalized=TRUE))
+normCounts <- norm_counts
+
+# Import DF of GOI
+normCounts_goi_df <- read.csv("/Data/Input/RNAseq/REF/normCounts_goi_mouse.csv",header = TRUE, fileEncoding = "UTF-8-BOM")
+
+# vectors of genes of interest. Filtered for present
+goi <-  normCounts_goi_df[normCounts_goi_df$goi %in% row.names(dds_normCounts),]
+
+# Check all goi are present after filtering
+match(goi,row.names(normCounts))
+
+# Transform data
+counts_goi <- as.data.frame(t(normCounts[goi,]))
+counts.rn_counts_goi <- rownames(counts_goi)
+
+# Extract each gene in to a unique dataframe
+counts_data_list_goi <- list()
+for (i in seq_along(goi)) {
+  counts_data_list_goi[[goi[i]]] <- as.data.frame(counts_goi[, i])
+  rownames(counts_data_list_goi[[goi[i]]]) <- counts.rn_counts_goi
+  counts_data_list_goi[[goi[i]]] <-
+    rownames_to_column(counts_data_list_goi[[goi[i]]], var = "sample_id")
+  colnames(counts_data_list_goi[[goi[i]]])[2] <- "norm_counts"
+  counts_data_list_goi[[goi[i]]]$cell_line_abbr <-
+    dds_normCounts@colData$cell_line_abbr[match(counts_data_list_goi[[goi[i]]]$sample_id,
+                                          rownames(dds_normCounts@colData))]
+  counts_data_list_goi[[goi[i]]]$drug <-
+    dds_normCounts@colData$drug[match(counts_data_list_goi[[goi[i]]]$sample_id,
+                                       rownames(dds_normCounts@colData))]
+  counts_data_list_goi[[goi[i]]]$drug_conc_uM <-
+    dds_normCounts@colData$drug_conc_uM[match(counts_data_list_goi[[goi[i]]]$sample_id,
+                                  rownames(dds_normCounts@colData))]
+    counts_data_list_goi[[goi[i]]]$time_h <-
+    dds_normCounts@colData$time_h[match(counts_data_list_goi[[goi[i]]]$sample_id,
+                                  rownames(dds_normCounts@colData))]
+    counts_data_list_goi[[goi[i]]]$serum <-
+    dds_normCounts@colData$serum[match(counts_data_list_goi[[goi[i]]]$sample_id,
+                                  rownames(dds_normCounts@colData))]
+    counts_data_list_goi[[goi[i]]]$group <-
+    dds_normCounts@colData$group[match(counts_data_list_goi[[goi[i]]]$sample_id,
+                                  rownames(dds_normCounts@colData))]
+    counts_data_list_goi[[goi[i]]]$serum_group <-
+    dds_normCounts@colData$serum_group[match(counts_data_list_goi[[goi[i]]]$sample_id,
+                                  rownames(dds_normCounts@colData))]
+}
+
+# Save count data for GOI
+for (i in seq_along(counts_data_list_goi)) {
+  write.csv(
+  counts_data_list_goi[[i]],
+  file = paste0(output_dir_normCounts, names(counts_data_list_goi)[i], ".csv"),
+  row.names = TRUE
+  )
+}
+
+# Compute stats for GOI
+counts_data_list_goi_stats <- list()
+for (i in seq_along(counts_data_list_goi)) {
+  counts_data_list_goi_stats[[names(counts_data_list_goi)[i]]] <-
+    counts_data_list_goi[[i]] %>%
+    group_by(serum_group) %>%
+    summarise(
+      n = n(),
+      avg_normCount = mean(norm_counts),
+      sd = sd(norm_counts),
+      IQR = IQR(norm_counts),
+      MAD = mad(norm_counts),
+      Coeff.Variation.Prcnt =sd(norm_counts) / mean(norm_counts) * 100
+      )
+}
+
+# Save stats data for GOI
+for (i in seq_along(counts_data_list_goi_stats)) {
+  write.csv(
+  counts_data_list_goi_stats[[i]],
+  file = paste0(output_dir_normCounts, names(counts_data_list_goi_stats)[i], "_stats.csv"),
+  row.names = TRUE
+  )
+}
+
+# Boxplots on linear scale
+b <- list()
+for (i in seq_along(counts_data_list_goi)) {
+  b[[i]] <- ggplot(data = counts_data_list_goi[[i]],
+  aes(x = factor(paste0(counts_data_list_goi[[i]]$serum,"_",counts_data_list_goi[[i]]$cell_line_abbr,"_",counts_data_list_goi[[i]]$time_h), levels = mixedsort(unique(paste0(counts_data_list_goi[[i]]$serum,"_",counts_data_list_goi[[i]]$cell_line_abbr,"_",counts_data_list_goi[[i]]$time_h)))) ,
+  y = counts_data_list_goi[[i]]$norm_counts)) +
+  geom_boxplot() +
+  geom_point() +
+  xlab("Genotype") +
+  ylab("Normalized Counts") +
+  scale_y_continuous() +
+  labs(title = paste0(names(counts_data_list_goi[i]), " dds_normCounts")) +
+  theme(axis.text.x = element_text(angle = 90, hjust = 0.5, vjust = 0.5, size=rel(1)))
+  print(b[[i]])
+  ggsave(filename = paste0(
+    graph_dir_normCounts,
+    names(counts_data_list_goi)[[i]],
+    "_normCounts",
+    ".pdf"
+  ))
+}
+
+    
+# Graphics termination
+if(!is.null(dev.list())) dev.off()
+if(!is.null(dev.list())) graphics.off()
+
+})
+
+
+```
+
+
+#### DESeq2
+##### Comparisons
+```{r}
+# dds_EDA_ls
+dds_EDA_res_ls <- list()
+comps_ls <- list()
+system.time(for (h in seq_along(dds_EDA_ls)){
+
+# Extract one 
+dds_EDA_subset <- dds_EDA_ls[[h]]
+
+# Directories
+# Directories for normCounts
+dir.create(paste0(output_dir,names(dds_EDA_ls)[h],"/"))
+output_dir_comps <- paste0(output_dir,names(dds_EDA_ls)[h],"/")
+dir.create(paste0(graph_dir,names(dds_EDA_ls)[h],"/"))
+graph_dir_comps <- paste0(graph_dir,names(dds_EDA_ls)[h],"/")  
+
+
+# dds_EDA_subset
+# comps
+comps_factor <- as.vector(factor(paste0(colData(dds_EDA_subset)$serum_group)))
+comps_df <- crossing(comp_num=comps_factor, comp_denom=comps_factor)
+comps_df <- subset(comps_df, as.character(comps_df$comp_num) != as.character(comps_df$comp_denom))
+
+# All comps
+comps_df_all <- comps_df
+comps_df_all <- cbind(comp_type="serum_group",comps_df_all)
+comps_df_all <- cbind(comp_no=1:nrow(comps_df_all),comps_df_all)
+comps_df_all$comp_name <- paste(comps_df_all$comp_num, "vs", comps_df_all$comp_denom, sep = "-")
+write.csv(comps_df_all, file=paste0(output_dir_comps,"comps_all.csv"), col.names = T, row.names = F)
+comps_all_subset <- comps_df_all[,2:4]
+
+# Unique comps only (for only unique combos)
+comps_df_unique <- comps_df[!duplicated(t(apply(comps_df, 1, sort))), ]
+comps_df_unique <- cbind(comp_type="serum_group",comps_df_unique )
+comps_df_unique <- cbind(comp_no=1:nrow(comps_df_unique),comps_df_unique)
+comps_df_unique$comp_name <- paste(comps_df_unique$comp_num, "vs", comps_df_unique$comp_denom, sep = "-")
+write.csv(comps_df_unique, file=paste0(output_dir_comps,"comps_unique.csv"), col.names = T, row.names = F)
+comps_unique_subset <- comps_df_unique[,2:4]
+
+# Comp list to use (all comps)
+comps <- comps_df_all
+
+# Save master list of comps
+comps_ls[[names(dds_EDA_ls)[h]]] <- comps
+
+# dds_EDA_subset
+dds_EDA_subset <- DESeqDataSet(dds_EDA_subset, design = ~serum_group)
+system.time(dds_EDA_subset_res <- DESeq(dds_EDA_subset, parallel = T, BPPARAM = MulticoreParam(ncore)))
+
+# Model Matrix
+model.matrix(design(dds_EDA_subset), colData(dds_EDA_subset))
+
+# save dds res
+dds_EDA_res_ls[[names(dds_EDA_ls)[h]]] <- dds_EDA_subset_res
+
+})
+
+# Save results
+saveRDS(dds_EDA_res_ls, file = paste0(output_dir,format(Sys.Date(),"%y%m%d"),"_","dds_EDA_res_ls",".rds"))
+
+# Save master list of comps
+saveRDS(comps_ls, file = paste0(output_dir,format(Sys.Date(),"%y%m%d"),"_","comps_ls",".rds"))
+
+```
+
+##### Results
+```{r}
+
+# Full list of extracted results
+comp_list_ls <- list()
+system.time(for(h in seq_along(dds_EDA_res_ls)){
+  
+# Extract one results
+dds_EDA_subset_res <-  dds_EDA_res_ls[[h]]
+
+# Extract comp
+comps <- comps_ls[[names(dds_EDA_res_ls)[h]]]
+# Directory for results
+dir.create(paste0(output_dir,names(dds_EDA_res_ls)[h],"/","DE2_res"))
+output_dir_res <- paste0(output_dir,names(dds_EDA_res_ls)[h],"/","DE2_res/")
+dir.create(paste0(output_dir,names(dds_EDA_res_ls)[h],"/","DE2_res_ashr"))
+output_dir_res_ashr <- paste0(output_dir,names(dds_EDA_res_ls)[h],"/","DE2_res_ashr/")
+
+# dds_EDA_subset
+# Extract results
+comp_list <- list()
+system.time(for (i in 1:nrow(comps)) {
+  comp_list[[comps$comp_name[i]]] <-
+    results(
+      dds_EDA_subset_res,
+      contrast = unname(unlist(comps[i, 2:4])),
+      parallel = TRUE,
+      alpha = qval,
+      lfcThreshold = lfc,
+      pAdjustMethod = "fdr",
+      BPPARAM = MulticoreParam(ncore)
+    )
+})
+
+# Summarize comp results
+for (i in seq_along(comp_list)) {
+  print(names(comp_list[i]))
+  summary(comp_list[[i]])
+}
+
+# save results
+for (i in seq_along(comp_list)) {
+  write.csv(
+  comp_list[[i]],
+  file = paste0(output_dir_res,"comp_", i, "_", names(comp_list)[i], ".csv"),
+  row.names = TRUE
+  )
+}
+
+# Shrink results (ashr)
+comp_list_shrink <- list()
+for (i in 1:nrow(comps)) {
+  comp_list_shrink[[comps$comp_name[i]]] <-
+    lfcShrink(
+      dds_EDA_subset_res,
+      contrast = unname(unlist(comps[i,2:4])),
+      type = "ashr",
+      res =
+        comp_list[[names(comp_list)[[i]]]],
+      parallel = TRUE,
+      BPPARAM = MulticoreParam(ncore)
+    )
+}
+
+# save results
+for (i in seq_along(comp_list_shrink)) {
+  write.csv(
+  comp_list[[i]],
+  file = paste0(output_dir_res_ashr,"comp_", i, "_ashr_", names(comp_list_shrink)[i], ".csv"),
+  row.names = TRUE
+  )
+}
+# Save extracted results
+comp_list_ls[[names(dds_EDA_res_ls)[h]]] <- comp_list
+})
+
+# Save extracted results as RDS
+saveRDS(comp_list_ls, file = paste0(output_dir,format(Sys.Date(),"%y%m%d"),"_","comp_list_ls",".rds"))
+
+```
+
+
+###### Volcano Plots
+```{r, fig.keep='first'}
+
+for(h in seq_along(comp_list_ls)){
+  
+# Extract one
+comp_list <- comp_list_ls[[h]]
+  
+# Directory for volcano plots
+dir.create(paste0(graph_dir,names(comp_list_ls)[h],"/","volcano"))
+graph_dir_vol <- paste0(graph_dir,names(comp_list_ls)[h],"/","volcano/")
+
+# Plot Volcano
+volcano_plots_ls <- list()
+for (i in seq_along(comp_list)){
+  plot(volcano_plots_ls[[names(comp_list)[i]]] <- 
+    EnhancedVolcano(
+      comp_list[[i]], 
+      lab=row.names(comp_list[[i]]),
+      x="log2FoldChange",
+      y="padj",
+      title= paste0("RNA ",names(comp_list)[[i]]),
+      pCutoff =qval, 
+      FCcutoff =lfc,
+      pointSize = 2.0, 
+      labSize = 3.0 
+    ))}
+
+# Save Volcano
+for (i in seq_along(volcano_plots_ls)){
+ggsave(filename = paste0(graph_dir_vol,"comp_", i, "_", names(volcano_plots_ls)[[i]],".pdf"), plot=volcano_plots_ls[[i]])
+}
+
+# Graphics termination 
+if(!is.null(dev.list())) dev.off()
+if(!is.null(dev.list())) graphics.off()
+
+}
+
+```
+
+# Session Info
+```{r}
+sessionInfo()
+```
+
+# Timing End
+```{r}
+proc.time() - ptm
+```

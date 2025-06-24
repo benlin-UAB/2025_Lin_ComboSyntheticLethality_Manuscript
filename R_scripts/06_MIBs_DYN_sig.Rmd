@@ -1,0 +1,525 @@
+---
+title: "06_MIBs_DYN_sig"
+author: "Benjamin Lin"
+editor: "C Ryan Miller"
+date: '`r format(Sys.time(), "Last modified: %d %b %Y")`'
+output:
+  html_document:
+    toc: yes
+    toc_float: yes
+    toc_depth: 6 
+    code_folding: hide
+layout: page
+subtitle: "C Ryan Miller Lab @ UAB"
+affiliation: UAB
+editor_options: 
+  chunk_output_type: inline
+  markdown: 
+    wrap: sentence
+---
+
+This R Markdown (RMD) file performs exploratory data analysis (EDA) for the 2025 Lin manuscript.
+
+Script Timing Start
+```{r}
+ptm <- proc.time()
+```
+
+## Variables
+```{r}
+# adjusted pvalue
+qval <- 0.05
+pval <- 0.05
+lfc <- .5
+
+# Use max of 4 cores if available.
+ncore <- ifelse((detectCores()-2)>=4,4,detectCores()-2)
+
+# Bootstrapped values
+# we used B = 10 for demo. Recommended value is ~500. Number of bootstrapped values
+BS_N <- 10
+```
+
+Set.Seed
+```{r}
+# This will set the random number generator
+set.seed(888)
+```
+
+# MIBs_TMT_Clustering data
+## Directories
+```{r}
+# output directory
+output_dir <- paste0(Data, "Output/MIBs_TMT_Clustering_sig/")
+dir.create(paste0(output_dir))
+
+# Graphs
+graph_dir <- paste0(Data, "Graphs/MIBs_TMT_Clustering_sig/")
+dir.create(paste0(graph_dir))
+```
+
+# Import limma res for each cell line
+```{r}
+
+cell_lines <- c("CEv3", "G12",  "G8"  , "G5"  , "G1" ,  "E5"  , "E4")
+
+# Import padj
+cell_line_limma_res <- list()
+for(i in seq_along(cell_lines)){
+  cell_line_limma_res[[cell_lines[i]]] <-
+    read.csv(file=paste0(Data,"Output/MIB-DYN/DEP_TMT_EDA/",cell_lines[i],"/Limma_res/All_coi_padj.csv"), row.names = 1)
+}
+
+# Annotate sig. If at any timepoint padj < 0.05 it is sig
+for(i in seq_along(cell_line_limma_res)){
+cell_line_limma_res[[i]][,paste0(names(cell_line_limma_res)[i],"_","sig")] <- ifelse(cell_line_limma_res[[i]][,1]<0.05,
+                                  "yes",
+                                  ifelse(cell_line_limma_res[[i]][,2]<0.05,
+                                  "yes",
+                                  ifelse(cell_line_limma_res[[i]][,3]<0.05,
+                                  "yes","no")))
+}
+
+# Extract sig genes
+sig_genes <- list()
+for (i in seq_along(cell_line_limma_res)){
+  sig_genes[[names(cell_line_limma_res)[i]]] <-
+    c(row.names(cell_line_limma_res[[i]][cell_line_limma_res[[i]][,4]=="yes",]))
+}
+
+
+```
+
+## Import TMT counts
+```{r}
+DEP_TMT_EDA_mv_ls <- readRDS(tail(grep("DEP_TMT_EDA_mv_ls.rds",list.files(paste0(Data,"Output/MIB-DYN/DEP_TMT_EDA"), recursive = T, full.names = T), value = T),1))
+DEP_TMT_EDA_mv_ls <- subset(DEP_TMT_EDA_mv_ls, names(DEP_TMT_EDA_mv_ls) %in% cell_lines)
+```
+
+
+# Convert count to Z score
+```{r}
+# Extract clustering_normCounts and convert to z score
+clustering_normCounts_ls <- list()
+cluster_mat_ls <- list() # List of matrix
+cluster_mat.rn_ls <- list() # Gene names
+for(h in seq_along(DEP_TMT_EDA_mv_ls)){
+  normCounts <- assay(DEP_TMT_EDA_mv_ls[[h]])
+  
+  # Convert normCounts to Z score
+cluster_mat <- t(scale(t(normCounts)))
+
+# Remove rows with NA
+cluster_mat <- na.omit(cluster_mat)
+
+# Extract all genes 
+cluster_mat.rn <-row.names(cluster_mat)
+
+  # Save results to list
+  clustering_normCounts_ls[[names(DEP_TMT_EDA_mv_ls)[h]]] <- normCounts
+  cluster_mat_ls[[names(DEP_TMT_EDA_mv_ls)[h]]] <- cluster_mat
+  cluster_mat.rn_ls [[names(DEP_TMT_EDA_mv_ls)[h]]] <- cluster_mat.rn
+}
+
+# Extract all genes to list of df with metadata
+DEP_TMT_EDA_cluster_mat_gene_ls <-list ()
+for (h in seq_along(cluster_mat_ls)){
+  # Extract
+  cluster_mat <- cluster_mat_ls[[h]]
+  cluster_mat.rn <- cluster_mat.rn_ls[[names(cluster_mat_ls)[h]]]
+  DEP_TMT_EDA <- DEP_TMT_EDA_mv_ls[[names(cluster_mat_ls)[h]]]
+  
+# For each se object, extract all genes
+cluster_mat_gene_ls <- list()
+system.time(for (i in seq_along(cluster_mat.rn)) { 
+  cluster_mat_gene_ls[[row.names(cluster_mat)[i]]] <- as.data.frame(cluster_mat[i,])
+  colnames(cluster_mat_gene_ls[[cluster_mat.rn[i]]][1]) <- cluster_mat.rn[i]
+  cluster_mat_gene_ls[[cluster_mat.rn[i]]] <-
+    rownames_to_column(cluster_mat_gene_ls[[cluster_mat.rn[i]]], var = "sample_id")
+  colnames(cluster_mat_gene_ls[[cluster_mat.rn[i]]])[2] <- "z_norm_counts"
+    cluster_mat_gene_ls[[cluster_mat.rn[i]]]$Cell.Line <-
+    DEP_TMT_EDA@colData$Cell.Line[match(cluster_mat_gene_ls[[cluster_mat.rn[i]]]$sample_id,
+                                          rownames(DEP_TMT_EDA@colData))]
+  cluster_mat_gene_ls[[cluster_mat.rn[i]]]$Timepoint <-
+    DEP_TMT_EDA@colData$Timepoint[match(cluster_mat_gene_ls[[cluster_mat.rn[i]]]$sample_id,
+                                       rownames(DEP_TMT_EDA@colData))]
+  cluster_mat_gene_ls[[cluster_mat.rn[i]]]$cell_line_abbr <-
+    DEP_TMT_EDA@colData$cell_line_abbr[match(cluster_mat_gene_ls[[cluster_mat.rn[i]]]$sample_id,
+                                  rownames(DEP_TMT_EDA@colData))]
+  cluster_mat_gene_ls[[cluster_mat.rn[i]]]$replicate <-
+    DEP_TMT_EDA@colData$replicate[match(cluster_mat_gene_ls[[cluster_mat.rn[i]]]$sample_id,
+                                  rownames(DEP_TMT_EDA@colData))]
+}
+)
+DEP_TMT_EDA_cluster_mat_gene_ls[[names(cluster_mat_ls)[h]]] <- cluster_mat_gene_ls
+
+# Save as RDS
+saveRDS(DEP_TMT_EDA_cluster_mat_gene_ls, file = paste0(output_dir,"DEP_TMT_EDA_cluster_mat_gene_ls",".rds"))
+
+}
+```
+
+
+## Extract Median and SumStats
+```{r}
+# Function to get medians 
+medians_cluster_data <- function(data) {
+  data %>%
+    group_by(Cell.Line, Timepoint) %>%
+    summarise(
+      median = median(z_norm_counts, na.rm = TRUE),
+      .groups = 'drop'
+    )
+}
+
+# Function to get stats
+stats_cluster_data <- function(data) {
+  data %>%
+    group_by(Cell.Line, Timepoint) %>%
+    summarise(
+      n = n(),
+      avg_normCount = mean(z_norm_counts),
+      median = median(z_norm_counts, na.rm = TRUE),
+      sd = sd(z_norm_counts),
+      IQR = IQR(z_norm_counts),
+      MAD = mad(z_norm_counts),
+      Coeff.Variation.Prcnt =sd(z_norm_counts) / mean(z_norm_counts) * 100,
+      .groups = 'drop'
+    )
+}
+
+# Extract median values from Z scores
+DEP_TMT_EDA_cluster_mat_gene_ls_stats <- list()
+DEP_TMT_EDA_cluster_mat_gene_ls_median <- list()
+DEP_TMT_EDA_cluster_mat_gene_median <- list()
+z_mat_ls <- list()
+DEP_TMT_EDA_cluster_mat_gene_sd <- list()
+system.time(for(h in seq_along(DEP_TMT_EDA_cluster_mat_gene_ls)){
+  
+  # Extract one
+  cluster_mat_gene_ls <- DEP_TMT_EDA_cluster_mat_gene_ls[[h]]
+  
+  # Directories
+  dir.create(paste0(output_dir,names(DEP_TMT_EDA_cluster_mat_gene_ls)[h],"/"))
+  output_dir_med <- paste0(output_dir,names(DEP_TMT_EDA_cluster_mat_gene_ls)[h],"/")
+  dir.create(paste0(graph_dir,names(DEP_TMT_EDA_cluster_mat_gene_ls)[h],"/"))
+  graph_dir_med <- paste0(graph_dir,names(DEP_TMT_EDA_cluster_mat_gene_ls)[h],"/")
+  
+  # Compute stats and calculate medians
+cluster_mat_gene_ls_stats <- list()
+cluster_mat_gene_ls_median <- list()
+
+# Apply the median function to each gene
+system.time(cluster_mat_gene_ls_median <- lapply(cluster_mat_gene_ls, medians_cluster_data))
+
+# Apply the stats function to each gene
+system.time(cluster_mat_gene_ls_stats <- lapply(cluster_mat_gene_ls, stats_cluster_data))
+
+# Save intermediates
+  DEP_TMT_EDA_cluster_mat_gene_ls_stats[[names(DEP_TMT_EDA_cluster_mat_gene_ls)[h]]] <- cluster_mat_gene_ls_stats
+  DEP_TMT_EDA_cluster_mat_gene_ls_median[[names(DEP_TMT_EDA_cluster_mat_gene_ls)[h]]] <- cluster_mat_gene_ls_median
+
+# Save as RDS
+  saveRDS(cluster_mat_gene_ls_stats, file = paste0(output_dir_med,names(DEP_TMT_EDA_cluster_mat_gene_ls)[h],".rds"))
+
+
+# Clean up each gene median DF for full join
+for ( i in seq_along(cluster_mat_gene_ls_median)){
+  # Rename median column to gene name
+  names(cluster_mat_gene_ls_median[[names(cluster_mat_gene_ls)[i]]])[names(cluster_mat_gene_ls_median[[names(cluster_mat_gene_ls)[i]]])=="median"] <- paste0(names(cluster_mat_gene_ls)[i])
+  # Metadata column
+  cluster_mat_gene_ls_median[[i]]$med_sample <- paste0(cluster_mat_gene_ls_median[[i]]$Timepoint,".",cluster_mat_gene_ls_median[[i]]$Cell.Line)
+  # Keep median column and metadata column
+  cluster_mat_gene_ls_median[[i]] <- cluster_mat_gene_ls_median[[i]][,which(colnames(cluster_mat_gene_ls_median[[i]]) %in% c(paste0(names(cluster_mat_gene_ls_median)[i]),"med_sample"))]
+}
+
+# Convert list to dataframe by timepoints
+system.time(cluster_mat_gene_median <- cluster_mat_gene_ls_median %>% reduce(full_join, by = 'med_sample') )
+
+# Oranize and label dataframe
+cluster_mat_gene_median <- data.frame(cluster_mat_gene_median)
+rownames(cluster_mat_gene_median) <- cluster_mat_gene_median$med_sample
+
+# Remove sample names from matrix
+cluster_mat_gene_median <- cluster_mat_gene_median[,!colnames(cluster_mat_gene_median)=="med_sample"]
+
+# Pivot 
+t_cluster_mat_gene_median <- t(cluster_mat_gene_median)
+
+# Median values 
+DEP_TMT_EDA_cluster_mat_gene_median[[names(DEP_TMT_EDA_cluster_mat_gene_ls)[h]]] <- data.frame(t_cluster_mat_gene_median)
+
+# Save Median Values
+write.csv(data.frame(t_cluster_mat_gene_median), file = paste0(output_dir_med,names(DEP_TMT_EDA_cluster_mat_gene_ls)[h],"_med",".csv"))
+
+
+# Scale matrix by Z score.
+z_mat <- (t_cluster_mat_gene_median-mean(t_cluster_mat_gene_median))/sd(t_cluster_mat_gene_median)
+
+# Save z Values
+write.csv(z_mat, file = paste0(output_dir_med,names(DEP_TMT_EDA_cluster_mat_gene_ls)[h],"_z_mat",".csv"))
+
+# Z matrix for clustering
+z_mat_ls[[names(DEP_TMT_EDA_cluster_mat_gene_ls)[h]]] <- z_mat
+
+# Clean up sd stat for full join
+for ( i in seq_along(cluster_mat_gene_ls_stats)){
+  # Rename sd column to gene name
+  names(cluster_mat_gene_ls_stats[[names(cluster_mat_gene_ls)[i]]])[names(cluster_mat_gene_ls_stats[[names(cluster_mat_gene_ls)[i]]])=="sd"] <- paste0(names(cluster_mat_gene_ls)[i])
+  # Metadata column
+  cluster_mat_gene_ls_stats[[i]]$sd_sample <- paste0(cluster_mat_gene_ls_stats[[i]]$Timepoint,".",cluster_mat_gene_ls_stats[[i]]$Cell.Line)
+  # Keep median column and metadata column
+  cluster_mat_gene_ls_stats[[i]] <- cluster_mat_gene_ls_stats[[i]][,which(colnames(cluster_mat_gene_ls_stats[[i]]) %in% c(paste0(names(cluster_mat_gene_ls_stats)[i]),"sd_sample"))]
+}
+
+# Convert list to dataframe by timepoints
+system.time(cluster_mat_gene_stats <- cluster_mat_gene_ls_stats %>% reduce(full_join, by = 'sd_sample') )
+
+# Organize and label dataframe
+cluster_mat_gene_stats <- data.frame(cluster_mat_gene_stats)
+rownames(cluster_mat_gene_stats) <- cluster_mat_gene_stats$sd_sample
+
+# Remove sample names from matrix
+cluster_mat_gene_stats <- cluster_mat_gene_stats[,!colnames(cluster_mat_gene_stats)=="sd_sample"]
+
+# Pivot 
+t_cluster_mat_gene_stats <- data.frame(t(cluster_mat_gene_stats))
+
+# Save SD
+DEP_TMT_EDA_cluster_mat_gene_sd[[names(DEP_TMT_EDA_cluster_mat_gene_ls)[h]]] <- t_cluster_mat_gene_stats
+
+# Save SD Values
+write.csv(t_cluster_mat_gene_stats, file = paste0(output_dir_med,names(DEP_TMT_EDA_cluster_mat_gene_ls)[h],"_sd",".csv"))
+
+})
+
+
+```
+
+
+## Filter Z matrix by sig genes
+```{r}
+
+
+# Filter z matrix
+z_mat_filt_ls <- list()
+for (h in seq_along(z_mat_ls)){
+  
+  # Directories
+  dir.create(paste0(output_dir,names(DEP_TMT_EDA_cluster_mat_gene_ls)[h],"/"))
+  output_dir_z <- paste0(output_dir,names(DEP_TMT_EDA_cluster_mat_gene_ls)[h],"/")
+  dir.create(paste0(graph_dir,names(DEP_TMT_EDA_cluster_mat_gene_ls)[h],"/"))
+  graph_dir_z <- paste0(graph_dir,names(DEP_TMT_EDA_cluster_mat_gene_ls)[h],"/")
+  
+  
+  # Extract one
+  z_mat <- z_mat_ls[[h]]
+  t_cluster_mat_gene_stats <- DEP_TMT_EDA_cluster_mat_gene_sd[[names(z_mat_ls)[h]]]
+  
+  # Save Z mat
+  write.csv(z_mat, file = paste0(output_dir_z,"z_",names(DEP_TMT_EDA_cluster_mat_gene_ls)[h],".csv"))
+
+  
+  # Filter
+  z_mat_filt <- z_mat[row.names(z_mat) %in% (sig_genes[[paste0(names(DEP_TMT_EDA_cluster_mat_gene_ls)[h])]]),]
+
+  # Save
+  z_mat_filt_ls[[names(z_mat_ls)[h]]] <- data.frame(z_mat_filt)
+  
+  # Save Z filt
+  write.csv(data.frame(z_mat_filt), file = paste0(output_dir_z,"z_filt_",names(DEP_TMT_EDA_cluster_mat_gene_ls)[h],".csv"))
+
+}
+
+# Save as RDS
+saveRDS(z_mat_ls, file = paste0(output_dir,"z_mat_ls",".rds"))
+saveRDS(z_mat_filt_ls, file = paste0(output_dir,"z_mat_filt_ls",".rds"))
+
+
+```
+
+#### K-means clustering
+```{r}
+# K-means clustering (2 clusters)
+kmeans_res_ls <- list()
+for (i in seq_along(z_mat_filt_ls)){
+  set.seed(888)
+  kmeans_res_ls[[names(z_mat_filt_ls)[i]]] <-
+    kmeans(z_mat_filt_ls[[i]],2, nstart = 25)
+}
+
+
+# Merge clusters with gene matrix
+z_mat_clut_clid_ls <- list()
+for (i in seq_along(z_mat_filt_ls)){
+  
+  # Directories
+  dir.create(paste0(output_dir,names(z_mat_filt_ls)[i],"/"))
+  output_dir_clut <- paste0(output_dir,names(z_mat_filt_ls)[i],"/")
+  dir.create(paste0(graph_dir,names(z_mat_filt_ls)[i],"/"))
+  graph_dir_clut <- paste0(graph_dir,names(z_mat_filt_ls)[i],"/")
+  
+  z_mat_clut_clid_ls[[names(z_mat_filt_ls)[i]]] <-
+    data.frame(cbind(z_mat_filt_ls[[names(z_mat_filt_ls)[i]]], cluster = as.factor(kmeans_res_ls[[names(z_mat_filt_ls)[i]]]$cluster)))
+
+# Save DF
+write.csv(z_mat_clut_clid_ls[[names(z_mat_filt_ls)[i]]], file = paste0(output_dir_clut,"ClusterGenes_",names(z_mat_clut_clid_ls)[i],".csv"))
+}
+
+
+# Assign up or down label
+for (i in seq_along(z_mat_clut_clid_ls)){
+
+z_mat_clut_clid <- z_mat_clut_clid_ls[[i]]
+
+z_mat_clut_clid <- data.frame(z_mat_clut_clid)
+z_mat_clut_clid$gene <- row.names(z_mat_clut_clid)
+# Get mean z score of 0 and 48
+cluster_assign <- z_mat_clut_clid %>% group_by(cluster) %>% summarise(mean_0=mean(.data[[grep("X0",colnames(z_mat_clut_clid),value = T)]]),
+                                                            mean_48=mean(.data[[grep("X48",colnames(z_mat_clut_clid),value = T)]]))
+# Get difference (48-0)
+cluster_assign$difference <- (cluster_assign$mean_48-cluster_assign$mean_0)
+
+# Assign up and down labels
+cluster_assign$label <- ifelse(cluster_assign$difference>0,"up","down")
+
+# Add labels
+z_mat_clut_clid <- inner_join(z_mat_clut_clid,data.frame(cluster_assign), by="cluster")
+
+# Add back rownames
+row.names(z_mat_clut_clid) <- z_mat_clut_clid$gene
+
+# Overwrite
+z_mat_clut_clid_ls[[names(z_mat_clut_clid_ls)[i]]] <- z_mat_clut_clid
+}
+
+# Save RDS of labeled genes and clusters
+saveRDS(z_mat_clut_clid_ls, file = paste0(output_dir,format(Sys.Date(),"%y%m%d"),"_","z_mat_clut_clid_ls",".rds"))
+
+```
+
+# Heatmap of clusters
+```{r}
+ggplot_df_ls <- list()
+for (h in seq_along(DEP_TMT_EDA_mv_ls)){
+ 
+kmeans_res_clusters <- z_mat_clut_clid_ls[[names(DEP_TMT_EDA_mv_ls)[h]]]
+  
+# Values are already transformed. Extract to vsd
+vsd <- DEP_TMT_EDA_mv_ls[[h]]
+head(assay(vsd),3)
+
+# Subset dds to contain genes in the clustering analysis
+cluster_vsd <-vsd[row.names(vsd) %in% row.names(kmeans_res_clusters),]
+
+# Heatmap_GOI_df_ls
+heatmap_goi <- kmeans_res_clusters
+
+# Extract matrix values
+mat_list <- as.matrix(assay(cluster_vsd))
+
+# Heatmap annotation labels
+annotation_col <- HeatmapAnnotation(df = data.frame(Model = cluster_vsd@colData$Timepoint),
+    col = list(time_h= 
+                 c(
+    '0'='black',
+    '4'='blue',
+    '24'='purple',
+    '48'='orange'
+  )
+  ))
+
+# Generate Heatmap
+Heatmap <- ComplexHeatmap::Heatmap(
+  t(scale(t(mat_list))),
+  top_annotation = annotation_col,
+  name = " ",
+  column_split = cluster_vsd@colData$Timepoint,
+  column_order = colnames(cluster_vsd)[order(cluster_vsd@colData$Timepoint)],
+  column_title = paste0(names(DEP_TMT_EDA_mv_ls)[h]," MIBs 3 µM Afatinib"),
+  row_split = heatmap_goi[row.names(mat_list),]["label"] ,
+  row_gap = unit(1, "mm"),
+  show_column_names = F,
+  show_row_names = T,
+  row_names_gp = gpar(fontsize = 8),
+  width = ncol(mat_list)*unit(5, "mm"), 
+  height = nrow(mat_list)*unit(2.5, "mm")
+  )
+
+draw(Heatmap)
+
+# Directories
+  dir.create(paste0(output_dir,names(DEP_TMT_EDA_mv_ls)[h],"/"))
+  output_dir_heatmap <- paste0(output_dir,names(DEP_TMT_EDA_mv_ls)[h],"/")
+  dir.create(paste0(graph_dir,names(DEP_TMT_EDA_mv_ls)[h],"/"))
+  graph_dir_heatmap <- paste0(graph_dir,names(DEP_TMT_EDA_mv_ls)[h],"/")
+
+# Get height and width of heatmap for pdf
+width = convertX(ComplexHeatmap:::width(draw(Heatmap)), "inch", valueOnly = TRUE)
+height = convertY(ComplexHeatmap:::height(draw(Heatmap)), "inch", valueOnly = TRUE)
+
+pdf(file=paste0(graph_dir_heatmap, "ClusterHeatmap_" , names(DEP_TMT_EDA_mv_ls)[h], ".pdf"), width = width, height = height)
+draw(Heatmap)
+dev.off()
+  
+}
+
+```
+
+## Gene Profile Plots
+```{r}
+for (h in seq_along(z_mat_clut_clid_ls)){
+  
+
+# Extract one
+kmeans_res_clusters <- z_mat_clut_clid_ls[[names(z_mat_clut_clid_ls)[h]]]
+z_mat_filt <- z_mat_filt_ls[[names(z_mat_clut_clid_ls)[h]]]
+
+
+# Organization for ggplot dataframe
+df <- data.frame(z_mat_filt)
+df$gene <- row.names(df)
+df_ggplot <- df %>% pivot_longer(-gene)
+cluster <- data.frame(kmeans_res_clusters[,"label"])
+cluster$gene <- row.names(kmeans_res_clusters)
+row.names(cluster) <- cluster$gene
+df_cluster_ggplot <-  inner_join(df_ggplot, cluster, by = "gene")
+names(df_cluster_ggplot)[4] <- "label"
+df_cluster_ggplot$Timepoint <- gsub("X","",sapply(strsplit(df_cluster_ggplot$name,"\\."),"[",1))
+
+gene_plot <- df_cluster_ggplot %>%
+ggplot(aes(Timepoint, value)) +
+  geom_line(aes(group = gene)) +
+  facet_wrap(vars(label), ncol = 4) + 
+    labs(title = paste0("MIB Clusters ",names(z_mat_clut_clid_ls)[h])) + 
+  theme_bw() +
+  scale_x_discrete(limits = c("0", "4", "24", "48"), expand = c(0,0.1))
+
+plot(gene_plot)
+
+# Save plot
+
+# Directories
+  dir.create(paste0(output_dir,names(z_mat_clut_clid_ls)[h],"/"))
+  output_dir_gp <- paste0(output_dir,names(z_mat_clut_clid_ls)[h],"/")
+  dir.create(paste0(graph_dir,names(z_mat_clut_clid_ls)[h],"/"))
+  graph_dir_gp <- paste0(graph_dir,names(z_mat_clut_clid_ls)[h],"/")
+
+pdf(file=paste0(graph_dir_gp, "GeneProfilePlot_" , names(z_mat_clut_clid_ls)[h], ".pdf"))
+plot(gene_plot)
+dev.off()
+
+}
+```
+
+# Session Info
+```{r}
+sessionInfo()
+```
+
+# Timing End
+```{r}
+proc.time() - ptm
+```
+
+

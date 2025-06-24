@@ -1,0 +1,173 @@
+---
+title: "GEO"
+author: "Benjamin Lin"
+date: '`r format(Sys.time(), "Last modified: %d %b %Y")`'
+output:
+  html_document:
+    toc: yes
+    toc_float: yes
+    toc_depth: 6 
+    code_folding: hide
+layout: page
+subtitle: "C Ryan Miller Lab @ UAB"
+affiliation: UAB
+editor_options: 
+  chunk_output_type: inline
+  markdown: 
+    wrap: sentence
+---
+
+Script Timing Start
+```{r}
+ptm <- proc.time()
+```
+
+Load Libraries
+```{r, message = FALSE}
+library(SummarizedExperiment)
+```
+
+
+Docker mount directory
+```{r}
+Data <- paste0("/Data/")
+```
+
+# RNA
+```{r}
+# Import sequencing datasheet
+RNA_samples <-
+  read.csv(
+    paste0(Data, "Input/RNAseq/RNA_SampleSheet.csv"),
+    header = TRUE,
+    sep = ",",
+    stringsAsFactors = FALSE,
+    row.names = 1
+  )
+
+```
+
+## Copy files
+```{r}
+dir.create("/Data/GEO/")
+dir.create("/Data/GEO/RNA/")
+dir.create("/Data/GEO/RNA/Fastq/")
+dir.create("/Data/GEO/RNA/SF/")
+
+# Copy SF files
+for(i in seq_along(RNA_samples$sf_file)){
+  file.copy(paste0("/Data/Input/RNAseq/SF/",RNA_samples$sf_id[[i]], ".sf"),
+            paste0("/Data/GEO/RNA/SF/"))
+  
+}
+
+# Copy FASTQ files
+for(i in seq_along(RNA_samples$sf_file)){
+  file.copy(paste0("/Data/Input/RNAseq/Fastqs/",RNA_samples$sf_id[[i]], ".fastq.gz"),
+            paste0("/Data/GEO/RNA/Fastq/"))
+  
+}
+
+# Remove extra columns from samplesheet
+RNA_samples_simp <- RNA_samples[,colnames(RNA_samples) %in% c("sample","samp_replicate", "exp_replicate", "cell_line_abbr", "expt_type","serum","drug","time_h","drug_conc_uM")]
+
+# Save RNA Sample Sheet
+write.csv(RNA_samples_simp,file="/Data/GEO/RNA/RNA_Samples.csv")
+
+```
+
+
+# MIB-MS (Baseline)
+```{r}
+dir.create("/Data/GEO/MIB-BL/")
+
+# Import sample sheet
+MIB_samples <- read.csv(
+    paste0(Data, "Output/MIB-BL/MIB_baseline_SampleSheet.csv"),
+    header = TRUE,
+    sep = ",",
+    stringsAsFactors = FALSE,
+    row.names = 1
+  )
+
+# Remove extra columns from samplesheet
+MIB_samples_simp <- MIB_samples[,colnames(MIB_samples) %in% c("sample","samp_replicate", "exp_replicate", "cell_line_abbr", "prep_batch", "expt_type","serum","EGFR_TKI_sen")]
+
+# Save Sample Sheet
+write.csv(MIB_samples_simp,file="/Data/GEO/MIB-BL/MIB-BL_samples.csv")
+write.csv(MIB_samples,file="/Data/GEO/MIB-BL/MIB-BL_samples_AllMeta.csv")
+
+
+# Import Raw Values
+se_data_2019 <- read.csv(
+    paste0(Data, "Output/MIB-BL/MIB_baseline_RawData.csv"),
+    header = TRUE,
+    sep = ",",
+    stringsAsFactors = FALSE,
+    row.names = 1
+  )
+
+# Save Raw Values
+write.csv(se_data_2019,file="/Data/GEO/MIB-BL/MIB-BL_RawValues.csv")
+
+# read in imputation RDS to use for rest of code
+se_mibs_BL_mv <- readRDS(paste0("/Data/Input/MIB-MS/Baseline/","se_mibs_BL_mv",".rds"))
+
+# Save Imputed Values
+write.csv(assay(se_mibs_BL_mv),file="/Data/GEO/MIB-BL/MIB-BL_ImputedValues_Assay.csv")
+# write.csv(colData(se_mibs_BL_mv),file="/Data/GEO/MIB-BL/MIB-BL_ImputedValues_colData.csv")
+
+```
+
+# MIB-MS (Dynamic TMT multiplexed)
+```{r}
+dir.create("/Data/GEO/MIB-Dyn/")
+
+# Import sample sheet
+MIB_TMT_SampleSheet <- read.csv(
+    paste0(Data, "Output/MIB-Dyn/MIB_TMT_SampleSheet.csv"),
+    header = TRUE,
+    sep = ",",
+    stringsAsFactors = FALSE,
+    row.names = 1
+  )
+
+# Remove extra columns from samplesheet
+MIB_TMT_SampleSheet_simp <- MIB_TMT_SampleSheet[,colnames(MIB_TMT_SampleSheet) %in% c("Sample","replicate", "Exp_rep", "Timepoint", "label")]
+
+# Save Sample Sheet
+write.csv(MIB_TMT_SampleSheet_simp,file="/Data/GEO/MIB-Dyn/MIB-Dyn_samples.csv")
+write.csv(MIB_TMT_SampleSheet,file="/Data/GEO/MIB-Dyn/MIB-Dyn_samples_AllMeta.csv")
+
+
+# Import Raw Values
+se_mibs_TMT_mv <- read.csv(
+    paste0(Data, "Output/MIB-Dyn/MIB_TMT_RawData.csv"),
+    header = TRUE,
+    sep = ",",
+    stringsAsFactors = FALSE,
+    row.names = 1
+  )
+
+# Save Raw Values
+write.csv(se_mibs_TMT_mv,file="/Data/GEO/MIB-Dyn/MIB_TMT_RawValues.csv")
+
+
+
+# read in imputation RDS to use for rest of code
+se_mibs_TMT_mv <- readRDS(paste0("/Data/Input/MIB-MS/Dynamic/","se_mibs_TMT_mv",".rds"))
+
+# Save Imputed Values
+write.csv(assay(se_mibs_TMT_mv),file="/Data/GEO/MIB-Dyn/MIB-BL_ImputedValues_Assay.csv")
+
+```
+
+# Session Info
+```{r}
+sessionInfo()
+```
+
+# Timing End
+```{r}
+proc.time() - ptm
+```

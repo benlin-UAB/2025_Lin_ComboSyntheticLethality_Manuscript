@@ -1,0 +1,1080 @@
+---
+title: "07_mRNA_dynTKI"
+author: "Benjamin Lin"
+editor: "C Ryan Miller"
+date: '`r format(Sys.time(), "Last modified: %d %b %Y")`'
+output:
+  html_document:
+    toc: yes
+    toc_float: yes
+    toc_depth: 6 
+    code_folding: hide
+layout: page
+subtitle: "C Ryan Miller Lab @ UAB"
+affiliation: UAB
+editor_options: 
+  chunk_output_type: inline
+  markdown: 
+    wrap: sentence
+---
+
+This R Markdown (RMD) file performs exploratory data analysis (EDA) for the 2025 Lin manuscript.
+
+Script Timing Start
+```{r}
+ptm <- proc.time()
+```
+
+Docker mount directory
+```{r}
+Data <- paste0("/Data/")
+```
+
+## Variables
+```{r}
+# adjusted pvalue
+qval <- 0.05
+pval <- 0.05
+lfc <- 1
+
+# Use max of 4 cores if available.
+ncore <- ifelse((detectCores()-2)>=4,4,detectCores()-2)
+```
+
+Set.Seed
+```{r}
+# This will set the random number generator
+set.seed(888)
+```
+
+# RNASeq data
+## Directories
+```{r}
+# output directory
+RNA_output <- paste0(Data, "Output/mRNA_dynTKI/")
+dir.create(paste0(RNA_output))
+
+# Graphs
+RNA_graphs <- paste0(Data, "Graphs/mRNA_dynTKI/")
+dir.create(paste0(RNA_graphs))
+```
+
+## Import dynamic Experiments:
+```{r}
+
+# Import DDS objects
+mRNA_Afat_CEv3 <- readRDS(tail(grep("Afat_CEv3_starve.rds",list.files(paste0(Data,"Output/RNA/dds_EDA_subset/Afat_CEv3_starve"), recursive = F, full.names = T), value = T),1))
+mRNA_Ner_CEv3 <- readRDS(tail(grep("Ner_CEv3_1_starve.rds",list.files(paste0(Data,"Output/RNA/dds_EDA_subset/Ner_CEv3_1_starve"), recursive = F, full.names = T), value = T),1))
+
+# Import VSD objects
+vsd_ls <- readRDS(tail(grep("vsd_ls",list.files(paste0(Data,"Output/RNA/dds_EDA_subset"), recursive = F, full.names = T), value = T),1))
+
+# Results of DESEq2
+comp_list_ls <- readRDS(tail(grep("comp_list_ls.rds",list.files(paste0(Data,"Output/RNA/dds_EDA_subset"), recursive = F, full.names = T), value = T),1))
+
+# Comp List to generate results
+comp_ls <- readRDS(tail(grep("comps_ls.rds",list.files(paste0(Data,"Output/RNA/dds_EDA_subset"), recursive = F, full.names = T), value = T),1))
+
+# Subset comps
+mRNA_Afat_CEv3_comps <- comp_ls[["Afat_CEv3_starve"]]
+mRNA_Ner_CEv3_comps <- comp_ls[["Ner_CEv3_1_starve"]]
+
+# Subset Results
+mRNA_Afat_CEv3_res <- comp_list_ls[["Afat_CEv3_starve"]]
+mRNA_Ner_CEv3_res <- comp_list_ls[["Ner_CEv3_1_starve"]]
+
+# Subset VSD
+mRNA_Afat_CEv3_vsd <-  vsd_ls[["Afat_CEv3_starve"]]
+mRNA_Ner_CEv3_vsd <- vsd_ls[["Ner_CEv3_1_starve"]]
+
+```
+
+## Summarize results Afat
+```{r}
+# Directories 
+dir.create(paste0(RNA_output,"Afat_dyn"))
+output_dir_res <- paste0(RNA_output,"Afat_dyn/")
+dir.create(paste0(RNA_graphs,"Afat_dyn"))
+graph_dir_res <- paste0(RNA_graphs,"Afat_dyn/")
+
+# Copy over results
+comps_df_all  <- mRNA_Afat_CEv3_comps
+
+# Extract comps of interest
+coi <- comps_df_all[comps_df_all$comp_denom=="starve_CEv3_NA_0",]
+comp_list_oi <- mRNA_Afat_CEv3_res[names(mRNA_Afat_CEv3_res) %in% coi$comp_name]
+comp_list_oi <- lapply(comp_list_oi,data.frame)
+
+# Label list of DF
+for (i in seq_along(comp_list_oi)){
+  colnames(comp_list_oi[[i]]) <- paste0(colnames(comp_list_oi[[i]]),"_",names(comp_list_oi)[[i]])
+  comp_list_oi[[i]]$Gene_ID <- row.names(comp_list_oi[[i]])
+}
+
+# Left_join comps of interest to 1x spreadsheet
+comp_list_oi_master <- Reduce(function(x, y) left_join(x, y, by="Gene_ID"), comp_list_oi)
+row.names(comp_list_oi_master) <- comp_list_oi_master$Gene_ID
+comp_list_oi_master <- comp_list_oi_master[,-which(colnames(comp_list_oi_master)=="Gene_ID")]
+
+# Subset to spreadsheets
+comp_list_oi_padj <- comp_list_oi_master[,grep("padj_", colnames(comp_list_oi_master))]
+comp_list_oi_pvalue <- comp_list_oi_master[,grep("pvalue", colnames(comp_list_oi_master))]
+comp_list_oi_l2fc <- comp_list_oi_master[,grep("log2FoldChange_", colnames(comp_list_oi_master))]
+
+# Save spreadsheets
+write.csv(comp_list_oi_padj, file = paste0(output_dir_res,"All_coi_","padj",".csv"))
+write.csv(comp_list_oi_pvalue, file = paste0(output_dir_res,"All_coi_","pvalue",".csv"))
+write.csv(comp_list_oi_l2fc, file = paste0(output_dir_res,"All_coi_","l2fc",".csv"))
+
+# Copy over
+mRNA_Afat_CEv3_padj <- comp_list_oi_padj
+
+```
+
+### Summarize results Ner
+```{r}
+# Directories 
+dir.create(paste0(RNA_output,"Ner_dyn"))
+output_dir_res <- paste0(RNA_output,"Ner_dyn/")
+dir.create(paste0(RNA_graphs,"Ner_dyn"))
+graph_dir_res <- paste0(RNA_graphs,"Ner_dyn/")
+
+# Copy over results
+comps_df_all  <- mRNA_Ner_CEv3_comps
+
+# Extract comps of interest
+coi <- comps_df_all[comps_df_all$comp_denom=="starve_CEv3_NA_0",]
+comp_list_oi <- mRNA_Ner_CEv3_res[names(mRNA_Ner_CEv3_res) %in% coi$comp_name]
+comp_list_oi <- lapply(comp_list_oi,data.frame)
+
+# Label list of DF
+for (i in seq_along(comp_list_oi)){
+  colnames(comp_list_oi[[i]]) <- paste0(colnames(comp_list_oi[[i]]),"_",names(comp_list_oi)[[i]])
+  comp_list_oi[[i]]$Gene_ID <- row.names(comp_list_oi[[i]])
+}
+
+# Left_join comps of interest to 1x spreadsheet
+comp_list_oi_master <- Reduce(function(x, y) left_join(x, y, by="Gene_ID"), comp_list_oi)
+row.names(comp_list_oi_master) <- comp_list_oi_master$Gene_ID
+comp_list_oi_master <- comp_list_oi_master[,-which(colnames(comp_list_oi_master)=="Gene_ID")]
+
+# Subset to spreadsheets
+comp_list_oi_padj <- comp_list_oi_master[,grep("padj_", colnames(comp_list_oi_master))]
+comp_list_oi_pvalue <- comp_list_oi_master[,grep("pvalue", colnames(comp_list_oi_master))]
+comp_list_oi_l2fc <- comp_list_oi_master[,grep("log2FoldChange_", colnames(comp_list_oi_master))]
+
+# Save spreadsheets
+write.csv(comp_list_oi_padj, file = paste0(output_dir_res,"All_coi_","padj",".csv"))
+write.csv(comp_list_oi_pvalue, file = paste0(output_dir_res,"All_coi_","pvalue",".csv"))
+write.csv(comp_list_oi_l2fc, file = paste0(output_dir_res,"All_coi_","l2fc",".csv"))
+
+# Copy over
+mRNA_Ner_CEv3_padj <- comp_list_oi_padj
+```
+
+## Filter to significant
+```{r}
+
+# Filter out NA
+mRNA_Afat_CEv3_padj <- mRNA_Afat_CEv3_padj %>% drop_na()
+mRNA_Ner_CEv3_padj <- mRNA_Ner_CEv3_padj %>% drop_na()
+
+drug_DESEQ2_res <- list()
+drug_DESEQ2_res <- list(Afatinib=mRNA_Afat_CEv3_padj,
+                        Neratinib=mRNA_Ner_CEv3_padj)
+
+# Annotate sig. If at any timepoint padj < 0.05 it is sig
+for(i in seq_along(drug_DESEQ2_res)){
+drug_DESEQ2_res[[i]][,paste0(names(drug_DESEQ2_res)[i],"_","sig")] <- ifelse(drug_DESEQ2_res[[i]][,1]<0.05,
+                                  "yes",
+                                  ifelse(drug_DESEQ2_res[[i]][,2]<0.05,
+                                  "yes",
+                                  ifelse(drug_DESEQ2_res[[i]][,3]<0.05,
+                                  "yes","no")))
+}
+
+# Extract sig genes
+sig_genes_df <- list()
+sig_genes <- list()
+for (i in seq_along(drug_DESEQ2_res)){
+  sig_genes[[names(drug_DESEQ2_res)[i]]] <-
+    c(row.names(drug_DESEQ2_res[[i]][drug_DESEQ2_res[[i]][,4]=="yes",]))
+  
+  sig_genes_df[[names(drug_DESEQ2_res)[i]]] <- subset(drug_DESEQ2_res[[i]],drug_DESEQ2_res[[i]][,4]=="yes")
+}
+
+
+
+```
+
+## Upset Plot
+```{r}
+
+# Directories 
+dir.create(paste0(RNA_output,"All_sig"))
+output_dir <- paste0(RNA_output,"All_sig/")
+dir.create(paste0(RNA_graphs,"All_sig"))
+graph_dir<- paste0(RNA_graphs,"All_sig/")
+
+
+# Convert list to binary matrix
+Upset_matrix <- ComplexHeatmap::list_to_matrix(sig_genes)
+
+# Save Upset_matrix
+write.csv(Upset_matrix, file = paste0(output_dir, "FullUpset_matrix",".csv"))
+
+# convert list to combination matrix
+combo_matrix <- ComplexHeatmap::make_comb_mat(Upset_matrix)
+
+# Generate upset plot
+upset_plot <- ComplexHeatmap::UpSet(combo_matrix,
+                        row_names_gp =gpar(fontsize = 12) ,
+                        top_annotation = upset_top_annotation(
+                          combo_matrix, 
+                          add_numbers = TRUE, 
+                          numbers_gp = gpar(fontsize = 11),
+                          numbers_rot=0,  
+                          annotation_name_rot = 90, 
+                          axis_param=list (gp = gpar(fontsize = 11)),
+                          annotation_name_gp= gpar(fontsize = 14)),
+                        right_annotation = upset_right_annotation(
+                          combo_matrix, 
+                          add_numbers = TRUE, 
+                          numbers_gp = gpar(fontsize = 11),
+                          numbers_rot=0,
+                          axis_param=list (gp = gpar(fontsize = 11)),
+                          annotation_name_gp= gpar(fontsize = 14)),
+                        pt_size = unit(5, "pt"))
+
+upset_plot
+
+# Save upset_plot
+pdf(file=paste0(graph_dir, "UpsetFull" , ".pdf"))
+draw(upset_plot)
+dev.off()
+
+# Combination matrix
+combo_matrix
+
+# Vector for at least one overlaping set
+extraction_vector <- comb_name(combo_matrix)[1:1]
+
+# Extract overlap genes
+ol_genes <- c()
+for (i in seq_along(extraction_vector)){
+  x <- extract_comb(combo_matrix,extraction_vector[[i]])
+  ol_genes <- c(ol_genes,x)
+}
+
+write.csv(ol_genes, file = paste0(output_dir,"OL_genes",".csv"))
+
+Afat_unique <- sig_genes[["Afatinib"]]
+Afat_unique <- subset(Afat_unique,!(Afat_unique %in% ol_genes))
+Afat_unique
+
+Ner_unique <- sig_genes[["Neratinib"]]
+Ner_unique <- subset(Ner_unique,!(Ner_unique %in% ol_genes))
+Ner_unique
+
+# Save genes
+write.csv(Afat_unique, file = paste0(output_dir,"Afat_unique_Sig",".csv"))
+write.csv(Ner_unique, file = paste0(output_dir,"Ner_unique_Sig",".csv"))
+
+
+```
+
+
+```{r}
+# Convert to a list
+drug_mRNA_vsd_ls <- list(Afatinib=mRNA_Afat_CEv3_vsd,
+                        Neratinib=mRNA_Ner_CEv3_vsd)
+
+# Filter to sig genes
+drug_mRNA_vsd_sig_ls <- list()
+for(i in seq_along(drug_mRNA_vsd_ls)){
+  drug_mRNA_vsd_sig_ls[[names(drug_mRNA_vsd_ls)[i]]] <-
+    drug_mRNA_vsd_ls[[i]][row.names(drug_mRNA_vsd_ls[[i]]) %in% sig_genes[[names(drug_mRNA_vsd_ls)[i]]],]
+}
+
+# Save RDS
+saveRDS(drug_mRNA_vsd_ls, file = paste0(output_dir,format(Sys.Date(),"%y%m%d"),"_","drug_mRNA_vsd_ls",".rds"))
+
+```
+
+
+# Convert count to Z score
+```{r}
+
+# Directories 
+dir.create(paste0(RNA_output,"Sig_Clustering"))
+output_dir <- paste0(RNA_output,"Sig_Clustering/")
+dir.create(paste0(RNA_graphs,"Sig_Clustering"))
+graph_dir<- paste0(RNA_graphs,"Sig_Clustering/")
+
+# Extract clustering_normCounts and convert to z score
+clustering_normCounts_ls <- list()
+cluster_mat_ls <- list() # List of matrix
+cluster_mat.rn_ls <- list() # Gene names
+for(h in seq_along(drug_mRNA_vsd_ls)){
+  normCounts <- assay(drug_mRNA_vsd_ls[[h]])
+  
+  # Convert normCounts to Z score
+cluster_mat <- t(scale(t(normCounts)))
+
+# Remove rows with NA
+cluster_mat <- na.omit(cluster_mat)
+
+# Extract all genes 
+cluster_mat.rn <-row.names(cluster_mat)
+
+  # Save results to list
+  clustering_normCounts_ls[[names(drug_mRNA_vsd_ls)[h]]] <- normCounts
+  cluster_mat_ls[[names(drug_mRNA_vsd_ls)[h]]] <- cluster_mat
+  cluster_mat.rn_ls [[names(drug_mRNA_vsd_ls)[h]]] <- cluster_mat.rn
+}
+
+# Extract all genes to list of df with metadata
+mRNA_drug_dyn_cluster_mat_gene_ls <-list ()
+for (h in seq_along(cluster_mat_ls)){
+  # Extract
+  cluster_mat <- cluster_mat_ls[[h]]
+  cluster_mat.rn <- cluster_mat.rn_ls[[names(cluster_mat_ls)[h]]]
+  drug_mRNA_vsd <- drug_mRNA_vsd_ls[[names(cluster_mat_ls)[h]]]
+  
+# For each se object, extract all genes
+cluster_mat_gene_ls <- list()
+system.time(for (i in seq_along(cluster_mat.rn)) { 
+  cluster_mat_gene_ls[[row.names(cluster_mat)[i]]] <- as.data.frame(cluster_mat[i,])
+  colnames(cluster_mat_gene_ls[[cluster_mat.rn[i]]][1]) <- cluster_mat.rn[i]
+  cluster_mat_gene_ls[[cluster_mat.rn[i]]] <-
+    rownames_to_column(cluster_mat_gene_ls[[cluster_mat.rn[i]]], var = "sample_id")
+  colnames(cluster_mat_gene_ls[[cluster_mat.rn[i]]])[2] <- "z_norm_counts"
+    cluster_mat_gene_ls[[cluster_mat.rn[i]]]$Cell.Line <-
+    drug_mRNA_vsd@colData$cell_line_abbr[match(cluster_mat_gene_ls[[cluster_mat.rn[i]]]$sample_id,
+                                          rownames(drug_mRNA_vsd@colData))]
+  cluster_mat_gene_ls[[cluster_mat.rn[i]]]$Timepoint <-
+    drug_mRNA_vsd@colData$time_h[match(cluster_mat_gene_ls[[cluster_mat.rn[i]]]$sample_id,
+                                       rownames(drug_mRNA_vsd@colData))]
+  cluster_mat_gene_ls[[cluster_mat.rn[i]]]$cell_line_abbr <-
+    drug_mRNA_vsd@colData$cell_line_abbr[match(cluster_mat_gene_ls[[cluster_mat.rn[i]]]$sample_id,
+                                  rownames(drug_mRNA_vsd@colData))]
+  cluster_mat_gene_ls[[cluster_mat.rn[i]]]$replicate <-
+    drug_mRNA_vsd@colData$exp_replicate[match(cluster_mat_gene_ls[[cluster_mat.rn[i]]]$sample_id,
+                                  rownames(drug_mRNA_vsd@colData))]
+}
+)
+mRNA_drug_dyn_cluster_mat_gene_ls[[names(cluster_mat_ls)[h]]] <- cluster_mat_gene_ls
+
+# Save as RDS
+saveRDS(mRNA_drug_dyn_cluster_mat_gene_ls, file = paste0(output_dir,"mRNA_drug_dyn_cluster_mat_gene_ls",".rds"))
+
+}
+
+
+```
+
+
+## Extract Median and SumStats
+```{r}
+# Function to get medians 
+medians_cluster_data <- function(data) {
+  data %>%
+    group_by(Cell.Line, Timepoint) %>%
+    summarise(
+      median = median(z_norm_counts, na.rm = TRUE),
+      .groups = 'drop'
+    )
+}
+
+# Function to get stats
+stats_cluster_data <- function(data) {
+  data %>%
+    group_by(Cell.Line, Timepoint) %>%
+    summarise(
+      n = n(),
+      avg_normCount = mean(z_norm_counts),
+      median = median(z_norm_counts, na.rm = TRUE),
+      sd = sd(z_norm_counts),
+      IQR = IQR(z_norm_counts),
+      MAD = mad(z_norm_counts),
+      Coeff.Variation.Prcnt =sd(z_norm_counts) / mean(z_norm_counts) * 100,
+      .groups = 'drop'
+    )
+}
+
+# Extract median values from Z scores
+mRNA_drug_dyn_cluster_mat_gene_ls_stats <- list()
+mRNA_drug_dyn_cluster_mat_gene_ls_median <- list()
+mRNA_drug_dyn_cluster_mat_gene_median <- list()
+z_mat_ls <- list()
+mRNA_drug_dyn_cluster_mat_gene_sd <- list()
+system.time(for(h in seq_along(mRNA_drug_dyn_cluster_mat_gene_ls)){
+  
+  # Extract one
+  cluster_mat_gene_ls <- mRNA_drug_dyn_cluster_mat_gene_ls[[h]]
+  
+  # Directories
+  dir.create(paste0(output_dir,names(mRNA_drug_dyn_cluster_mat_gene_ls)[h],"/"))
+  output_dir_med <- paste0(output_dir,names(mRNA_drug_dyn_cluster_mat_gene_ls)[h],"/")
+  dir.create(paste0(graph_dir,names(mRNA_drug_dyn_cluster_mat_gene_ls)[h],"/"))
+  graph_dir_med <- paste0(graph_dir,names(mRNA_drug_dyn_cluster_mat_gene_ls)[h],"/")
+  
+  # Compute stats and calculate medians
+cluster_mat_gene_ls_stats <- list()
+cluster_mat_gene_ls_median <- list()
+
+# Apply the median function to each gene
+system.time(cluster_mat_gene_ls_median <- lapply(cluster_mat_gene_ls, medians_cluster_data))
+
+# Apply the stats function to each gene
+system.time(cluster_mat_gene_ls_stats <- lapply(cluster_mat_gene_ls, stats_cluster_data))
+
+# Save intermediates
+  mRNA_drug_dyn_cluster_mat_gene_ls_stats[[names(mRNA_drug_dyn_cluster_mat_gene_ls)[h]]] <- cluster_mat_gene_ls_stats
+  mRNA_drug_dyn_cluster_mat_gene_ls_median[[names(mRNA_drug_dyn_cluster_mat_gene_ls)[h]]] <- cluster_mat_gene_ls_median
+
+# Save as RDS
+  saveRDS(cluster_mat_gene_ls_stats, file = paste0(output_dir_med,names(mRNA_drug_dyn_cluster_mat_gene_ls)[h],".rds"))
+
+
+# Clean up each gene median DF for full join
+for ( i in seq_along(cluster_mat_gene_ls_median)){
+  # Rename median column to gene name
+  names(cluster_mat_gene_ls_median[[names(cluster_mat_gene_ls)[i]]])[names(cluster_mat_gene_ls_median[[names(cluster_mat_gene_ls)[i]]])=="median"] <- paste0(names(cluster_mat_gene_ls)[i])
+  # Metadata column
+  cluster_mat_gene_ls_median[[i]]$med_sample <- paste0(cluster_mat_gene_ls_median[[i]]$Timepoint,".",cluster_mat_gene_ls_median[[i]]$Cell.Line)
+  # Keep median column and metadata column
+  cluster_mat_gene_ls_median[[i]] <- cluster_mat_gene_ls_median[[i]][,which(colnames(cluster_mat_gene_ls_median[[i]]) %in% c(paste0(names(cluster_mat_gene_ls_median)[i]),"med_sample"))]
+}
+
+# Convert list to dataframe by timepoints
+system.time(cluster_mat_gene_median <- cluster_mat_gene_ls_median %>% reduce(full_join, by = 'med_sample') )
+
+# Oranize and label dataframe
+cluster_mat_gene_median <- data.frame(cluster_mat_gene_median)
+rownames(cluster_mat_gene_median) <- cluster_mat_gene_median$med_sample
+
+# Remove sample names from matrix
+cluster_mat_gene_median <- cluster_mat_gene_median[,!colnames(cluster_mat_gene_median)=="med_sample"]
+
+# Pivot 
+t_cluster_mat_gene_median <- t(cluster_mat_gene_median)
+
+# Median values 
+mRNA_drug_dyn_cluster_mat_gene_median[[names(mRNA_drug_dyn_cluster_mat_gene_ls)[h]]] <- data.frame(t_cluster_mat_gene_median)
+
+# Save Median Values
+write.csv(data.frame(t_cluster_mat_gene_median), file = paste0(output_dir_med,names(mRNA_drug_dyn_cluster_mat_gene_ls)[h],"_med",".csv"))
+
+
+# Scale matrix by Z score.
+z_mat <- (t_cluster_mat_gene_median-mean(t_cluster_mat_gene_median))/sd(t_cluster_mat_gene_median)
+
+# Save z Values
+write.csv(z_mat, file = paste0(output_dir_med,names(mRNA_drug_dyn_cluster_mat_gene_ls)[h],"_z_mat",".csv"))
+
+# Z matrix for clustering
+z_mat_ls[[names(mRNA_drug_dyn_cluster_mat_gene_ls)[h]]] <- z_mat
+
+# Clean up sd stat for full join
+for ( i in seq_along(cluster_mat_gene_ls_stats)){
+  # Rename sd column to gene name
+  names(cluster_mat_gene_ls_stats[[names(cluster_mat_gene_ls)[i]]])[names(cluster_mat_gene_ls_stats[[names(cluster_mat_gene_ls)[i]]])=="sd"] <- paste0(names(cluster_mat_gene_ls)[i])
+  # Metadata column
+  cluster_mat_gene_ls_stats[[i]]$sd_sample <- paste0(cluster_mat_gene_ls_stats[[i]]$Timepoint,".",cluster_mat_gene_ls_stats[[i]]$Cell.Line)
+  # Keep median column and metadata column
+  cluster_mat_gene_ls_stats[[i]] <- cluster_mat_gene_ls_stats[[i]][,which(colnames(cluster_mat_gene_ls_stats[[i]]) %in% c(paste0(names(cluster_mat_gene_ls_stats)[i]),"sd_sample"))]
+}
+
+# Convert list to dataframe by timepoints
+system.time(cluster_mat_gene_stats <- cluster_mat_gene_ls_stats %>% reduce(full_join, by = 'sd_sample') )
+
+# Organize and label dataframe
+cluster_mat_gene_stats <- data.frame(cluster_mat_gene_stats)
+rownames(cluster_mat_gene_stats) <- cluster_mat_gene_stats$sd_sample
+
+# Remove sample names from matrix
+cluster_mat_gene_stats <- cluster_mat_gene_stats[,!colnames(cluster_mat_gene_stats)=="sd_sample"]
+
+# Pivot 
+t_cluster_mat_gene_stats <- data.frame(t(cluster_mat_gene_stats))
+
+# Save SD
+mRNA_drug_dyn_cluster_mat_gene_sd[[names(mRNA_drug_dyn_cluster_mat_gene_ls)[h]]] <- t_cluster_mat_gene_stats
+
+# Save SD Values
+write.csv(t_cluster_mat_gene_stats, file = paste0(output_dir_med,names(mRNA_drug_dyn_cluster_mat_gene_ls)[h],"_sd",".csv"))
+
+})
+
+
+```
+
+
+## Filter Z matrix by sig genes
+```{r}
+
+
+# Filter z matrix
+z_mat_filt_ls <- list()
+for (h in seq_along(z_mat_ls)){
+  
+  # Directories
+  dir.create(paste0(output_dir,names(mRNA_drug_dyn_cluster_mat_gene_ls)[h],"/"))
+  output_dir_z <- paste0(output_dir,names(mRNA_drug_dyn_cluster_mat_gene_ls)[h],"/")
+  dir.create(paste0(graph_dir,names(mRNA_drug_dyn_cluster_mat_gene_ls)[h],"/"))
+  graph_dir_z <- paste0(graph_dir,names(mRNA_drug_dyn_cluster_mat_gene_ls)[h],"/")
+  
+  
+  # Extract one
+  z_mat <- z_mat_ls[[h]]
+  t_cluster_mat_gene_stats <- mRNA_drug_dyn_cluster_mat_gene_sd[[names(z_mat_ls)[h]]]
+  
+  # Save Z mat
+  write.csv(z_mat, file = paste0(output_dir_z,"z_",names(mRNA_drug_dyn_cluster_mat_gene_ls)[h],".csv"))
+
+  
+  # Filter
+  z_mat_filt <- z_mat[row.names(z_mat) %in% (sig_genes[[paste0(names(mRNA_drug_dyn_cluster_mat_gene_ls)[h])]]),]
+
+  # Save
+  z_mat_filt_ls[[names(z_mat_ls)[h]]] <- data.frame(z_mat_filt)
+  
+  # Save Z filt
+  write.csv(data.frame(z_mat_filt), file = paste0(output_dir_z,"z_filt_",names(mRNA_drug_dyn_cluster_mat_gene_ls)[h],".csv"))
+
+}
+
+# Save as RDS
+saveRDS(z_mat_ls, file = paste0(output_dir,"z_mat_ls",".rds"))
+saveRDS(z_mat_filt_ls, file = paste0(output_dir,"z_mat_filt_ls",".rds"))
+
+
+```
+
+#### K-means clustering
+```{r}
+# K-means clustering (2 clusters)
+kmeans_res_ls <- list()
+for (i in seq_along(z_mat_filt_ls)){
+  set.seed(888)
+  kmeans_res_ls[[names(z_mat_filt_ls)[i]]] <-
+    kmeans(z_mat_filt_ls[[i]],2, nstart = 25)
+}
+
+
+# Merge clusters with gene matrix
+z_mat_clut_clid_ls <- list()
+for (i in seq_along(z_mat_filt_ls)){
+  
+  # # Directories
+  # dir.create(paste0(output_dir,names(z_mat_filt_ls)[i],"/"))
+  # output_dir_clut <- paste0(output_dir,names(z_mat_filt_ls)[i],"/")
+  # dir.create(paste0(graph_dir,names(z_mat_filt_ls)[i],"/"))
+  # graph_dir_clut <- paste0(graph_dir,names(z_mat_filt_ls)[i],"/")
+  # 
+  z_mat_clut_clid_ls[[names(z_mat_filt_ls)[i]]] <-
+    data.frame(cbind(z_mat_filt_ls[[names(z_mat_filt_ls)[i]]], cluster = kmeans_res_ls[[names(z_mat_filt_ls)[i]]]$cluster))
+
+#   
+# # Save DF
+# write.csv(z_mat_clut_clid_ls[[names(z_mat_filt_ls)[i]]], file = paste0(output_dir_clut,"ClusterGenes_",names(z_mat_clut_clid_ls)[i],".csv"))
+}
+
+# Assign up or down label
+for (i in seq_along(z_mat_clut_clid_ls)){
+
+z_mat_clut_clid <- z_mat_clut_clid_ls[[i]]
+
+z_mat_clut_clid <- data.frame(z_mat_clut_clid)
+z_mat_clut_clid$gene <- row.names(z_mat_clut_clid)
+# Get mean z score of 0 and 48
+cluster_assign <- z_mat_clut_clid %>% group_by(cluster) %>% summarise(mean_0=mean(.data[[grep("X0",colnames(z_mat_clut_clid),value = T)]]),
+                                                            mean_48=mean(.data[[grep("X48",colnames(z_mat_clut_clid),value = T)]]))
+# Get difference (48-0)
+cluster_assign$difference <- (cluster_assign$mean_48-cluster_assign$mean_0)
+
+# Assign up and down labels
+cluster_assign$label <- ifelse(cluster_assign$difference>0,"up","down")
+
+# Add labels
+z_mat_clut_clid <- inner_join(z_mat_clut_clid,data.frame(cluster_assign), by="cluster")
+
+# Add back rownames
+row.names(z_mat_clut_clid) <- z_mat_clut_clid$gene
+
+# Overwrite
+z_mat_clut_clid_ls[[names(z_mat_clut_clid_ls)[i]]] <- z_mat_clut_clid
+
+  # Directories
+  dir.create(paste0(output_dir,names(z_mat_clut_clid_ls)[i],"/"))
+  output_dir_clut <- paste0(output_dir,names(z_mat_clut_clid_ls)[i],"/")
+  dir.create(paste0(graph_dir,names(z_mat_clut_clid_ls)[i],"/"))
+  graph_dir_clut <- paste0(graph_dir,names(z_mat_clut_clid_ls)[i],"/")
+  
+
+# Save DF
+write.csv(z_mat_clut_clid_ls[[names(z_mat_clut_clid_ls)[i]]], file = paste0(output_dir_clut,"ClusterGenes_",names(z_mat_clut_clid_ls)[i],".csv"))
+}
+
+# Save RDS of labeled genes and clusters
+saveRDS(z_mat_clut_clid_ls, file = paste0(output_dir,format(Sys.Date(),"%y%m%d"),"_","z_mat_clut_clid_ls",".rds"))
+
+```
+
+# Heatmap of clusters
+```{r}
+ggplot_df_ls <- list()
+for (h in seq_along(drug_mRNA_vsd_sig_ls)){
+ 
+  kmeans_res_clusters <- z_mat_clut_clid_ls[[names(drug_mRNA_vsd_sig_ls)[h]]]
+  
+   # Values are already transformed. Extract to vsd
+vsd <- drug_mRNA_vsd_sig_ls[[h]]
+head(assay(vsd),3)
+
+# Subset dds to contain genes in the clustering analysis
+cluster_vsd <-vsd[row.names(vsd) %in% row.names(kmeans_res_clusters),]
+
+# Heatmap_GOI_df_ls
+heatmap_goi <- kmeans_res_clusters
+
+# Extract matrix values
+mat_list <- as.matrix(assay(cluster_vsd))
+
+# Heatmap annotation labels
+annotation_col <- HeatmapAnnotation(df = data.frame(time_h = cluster_vsd@colData$time_h),
+    col = list(time_h= 
+                 c(
+    '0'='black',
+    '4'='blue',
+    '24'='purple',
+    '48'='orange'
+  )
+  ))
+
+# Generate Heatmap
+Heatmap <- ComplexHeatmap::Heatmap(
+  t(scale(t(mat_list))),
+  top_annotation = annotation_col,
+  name = " ",
+  column_split = cluster_vsd@colData$time_h,
+  column_order = colnames(cluster_vsd)[order(cluster_vsd@colData$time_h)],
+  column_title = paste0(names(drug_mRNA_vsd_sig_ls)[h]),
+  row_split = heatmap_goi[row.names(mat_list),]["label"] ,
+  row_gap = unit(1, "mm"),
+  show_column_names = F,
+  show_row_names = F
+  )
+  
+draw(Heatmap)
+
+# Directories
+  dir.create(paste0(output_dir,names(drug_mRNA_vsd_sig_ls)[h],"/"))
+  output_dir_heatmap <- paste0(output_dir,names(drug_mRNA_vsd_sig_ls)[h],"/")
+  dir.create(paste0(graph_dir,names(drug_mRNA_vsd_sig_ls)[h],"/"))
+  graph_dir_heatmap <- paste0(graph_dir,names(drug_mRNA_vsd_sig_ls)[h],"/")
+
+pdf(file=paste0(graph_dir_heatmap, "ClusterHeatmap_" , names(drug_mRNA_vsd_sig_ls)[h], ".pdf"))
+draw(Heatmap)
+dev.off()
+  
+}
+
+```
+
+## Gene Profile Plots
+```{r}
+for (h in seq_along(z_mat_clut_clid_ls)){
+  
+
+# Extract one
+kmeans_res_clusters <- z_mat_clut_clid_ls[[names(z_mat_clut_clid_ls)[h]]]
+z_mat_filt <- z_mat_filt_ls[[names(z_mat_clut_clid_ls)[h]]]
+
+
+# Organization for ggplot dataframe
+df <- data.frame(z_mat_filt)
+df$gene <- row.names(df)
+df_ggplot <- df %>% pivot_longer(-gene)
+cluster <- data.frame(kmeans_res_clusters[,"label"])
+cluster$gene <- row.names(kmeans_res_clusters)
+row.names(cluster) <- cluster$gene
+df_cluster_ggplot <-  inner_join(df_ggplot, cluster, by = "gene")
+names(df_cluster_ggplot)[4] <- "label"
+df_cluster_ggplot$Timepoint <- gsub("X","",sapply(strsplit(df_cluster_ggplot$name,"\\."),"[",1))
+
+gene_plot <- df_cluster_ggplot %>%
+ggplot(aes(Timepoint, value)) +
+  geom_line(aes(group = gene)) +
+  facet_wrap(vars(label), ncol = 4) + 
+    labs(title = paste0("mRNA Clusters ",names(z_mat_clut_clid_ls)[h])) + 
+  theme_bw() +
+  scale_x_discrete(limits = c("0", "4", "24", "48"), expand = c(0,0.1))
+
+plot(gene_plot)
+
+# Save plot
+
+# Directories
+  dir.create(paste0(output_dir,names(z_mat_clut_clid_ls)[h],"/"))
+  output_dir_gp <- paste0(output_dir,names(z_mat_clut_clid_ls)[h],"/")
+  dir.create(paste0(graph_dir,names(z_mat_clut_clid_ls)[h],"/"))
+  graph_dir_gp <- paste0(graph_dir,names(z_mat_clut_clid_ls)[h],"/")
+
+pdf(file=paste0(graph_dir_gp, "GeneProfilePlot_" , names(z_mat_clut_clid_ls)[h], ".pdf"))
+plot(gene_plot)
+dev.off()
+
+}
+```
+
+## Remove intersecting genes
+```{r}
+# Extract Res group
+z_mat_clut_clid_ls_res <- subset(z_mat_clut_clid_ls, names(z_mat_clut_clid_ls) %in% c("Afatinib", "Neratinib"))
+
+# Extract genes in each cluster for all cell lines
+df_cluster_summary <- data.frame()
+for(i in seq_along(z_mat_clut_clid_ls_res)){
+  summary <- z_mat_clut_clid_ls_res[[i]] %>% summarise(label, gene=row.names(z_mat_clut_clid_ls_res[[i]]), Drug = paste0(names(z_mat_clut_clid_ls_res)[i]))
+  df_cluster_summary <- rbind(df_cluster_summary,summary)
+}
+
+df_cluster_summary$Drug.cluster <- paste0(df_cluster_summary$Drug,".",df_cluster_summary$label)
+
+# List of vectors
+cluster_vectors_ls <- list()
+for(i in seq_along(unique(df_cluster_summary$Drug.cluster))){
+cluster_vectors_ls[[unique(df_cluster_summary$Drug.cluster)[i]]] <-
+  subset(df_cluster_summary, df_cluster_summary$Drug.cluster==unique(df_cluster_summary$Drug.cluster)[i])$gene
+}
+
+# Find intersecting genes
+intersect_genes <- c(intersect(cluster_vectors_ls$Afatinib.down,cluster_vectors_ls$Neratinib.up),intersect(cluster_vectors_ls$Afatinib.up,cluster_vectors_ls$Neratinib.down))
+
+# Filter out intersecting genes
+cluster_vectors_filt_ls <- lapply(cluster_vectors_ls, function(x) x[!(x %in% intersect_genes)])
+```
+
+
+## Find overlaps
+```{r}
+# Directories
+  dir.create(paste0(output_dir))
+  output_dir_Upset <- paste0(output_dir)
+  dir.create(paste0(graph_dir))
+  graph_dir_Upset <- paste0(graph_dir)
+
+# Convert list to binary matrix
+Upset_matrix <- ComplexHeatmap::list_to_matrix(cluster_vectors_filt_ls)
+
+# Save Upset_matrix
+write.csv(Upset_matrix, file = paste0(output_dir_Upset, "FullUpset_matrix",".csv"))
+
+# convert list to combination matrix
+combo_matrix <- ComplexHeatmap::make_comb_mat(Upset_matrix)
+
+# Generate upset plot
+upset_plot <- ComplexHeatmap::UpSet(combo_matrix,
+                        row_names_gp =gpar(fontsize = 12) ,
+                        top_annotation = upset_top_annotation(
+                          combo_matrix, 
+                          add_numbers = TRUE, 
+                          numbers_gp = gpar(fontsize = 11),
+                          numbers_rot=0,  
+                          annotation_name_rot = 90, 
+                          axis_param=list (gp = gpar(fontsize = 11)),
+                          annotation_name_gp= gpar(fontsize = 14)),
+                        right_annotation = upset_right_annotation(
+                          combo_matrix, 
+                          add_numbers = TRUE, 
+                          numbers_gp = gpar(fontsize = 11),
+                          numbers_rot=0,
+                          axis_param=list (gp = gpar(fontsize = 11)),
+                          annotation_name_gp= gpar(fontsize = 14)),
+                        pt_size = unit(5, "pt"))
+
+upset_plot
+
+# Save upset_plot
+pdf(file=paste0(graph_dir_Upset, "UpsetFull" , ".pdf"))
+draw(upset_plot)
+dev.off()
+
+# Combination matrix
+combo_matrix
+comb_name(combo_matrix)
+
+# Extract all from upset plot
+upset_genes_ls <- list()
+for(i in seq_along(comb_name(combo_matrix))){
+  upset_genes_ls[[paste0((set_name(combo_matrix)["1"==strsplit(comb_name(combo_matrix)[i],"")[[1]]])[1],"_",(set_name(combo_matrix)["1"==strsplit(comb_name(combo_matrix)[i],"")[[1]]])[2])]] <-
+    extract_comb(combo_matrix,comb_name(combo_matrix)[i])
+}
+
+# Convert to DF
+upset_genes_df <- do.call(cbind, lapply(upset_genes_ls, function(x) c(x, rep(NA, max(sapply(upset_genes_ls, length)) - length(x)))))
+
+# Save genes
+write.csv(upset_genes_df, file = paste0(output_dir_Upset,"upset_genes_df",".csv"))
+
+# Extract genes
+mRNA_OL_down <- upset_genes_ls[["Afatinib.down_Neratinib.down"]]
+mRNA_OL_up <- upset_genes_ls[["Afatinib.up_Neratinib.up"]]
+
+mRNA_Afat_down <- upset_genes_ls[["Afatinib.down_NA"]]
+mRNA_Afat_up <- upset_genes_ls[["Afatinib.up_NA"]]
+mRNA_Ner_down <- upset_genes_ls[["Neratinib.down_NA"]]
+mRNA_Ner_up <- upset_genes_ls[["Neratinib.up_NA"]]
+
+# Save genes
+write.csv(mRNA_OL_down, file = paste0(output_dir_Upset,"mRNA_OL_down",".csv"))
+write.csv(mRNA_OL_up, file = paste0(output_dir_Upset,"mRNA_OL_up",".csv"))
+
+write.csv(mRNA_Afat_down, file = paste0(output_dir_Upset,"mRNA_Afat_down",".csv"))
+write.csv(mRNA_Afat_up, file = paste0(output_dir_Upset,"mRNA_Afat_up",".csv"))
+write.csv(mRNA_Ner_down, file = paste0(output_dir_Upset,"mRNA_Ner_down",".csv"))
+write.csv(mRNA_Ner_up, file = paste0(output_dir_Upset,"mRNA_Ner_up",".csv"))
+
+```
+
+
+## gProfiler2
+### mRNA_OL_down
+```{r}
+# Directories
+  dir.create(paste0(output_dir,"gProfiler2_mRNA_OL_down","/"))
+  output_dir_gProfiler <- paste0(output_dir,"gProfiler2_mRNA_OL_down","/")
+  dir.create(paste0(graph_dir,"gProfiler2_mRNA_OL_down","/"))
+  graph_dir_gProfiler <- paste0(graph_dir,"gProfiler2_mRNA_OL_down","/")
+
+gost_df <- data.frame(mRNA_OL_down)
+colnames(gost_df)[1]<- "mouse_gene"
+
+# Translate to human genes
+gost_genes <- inner_join(gost_df,bm_hEGFR,by=c("mouse_gene"="external_gene_name"))
+
+# Save genes
+write.csv(gost_genes,file=paste0(output_dir,"ol_genes",".csv"))
+
+# gProfiler2 analysis with GO genesets
+gost_res <-
+  gost(gost_genes$hsapiens_homolog_associated_gene_name,
+    organism = "hsapiens",
+      ordered_query = F,
+      significant = T,
+      exclude_iea = T,
+      user_threshold = 0.05,
+      domain_scope = "annotated",
+      sources = "GO:BP",
+      correction_method = "g_SCS",
+      highlight = T)
+
+# Results of gProfiler2
+data.frame(gost_res$result[,c("p_value","intersection_size","term_id","source","term_name")])
+
+# Save gProfiler2 results to csv
+write.csv(data.frame(gost_res$result[,c("p_value","intersection_size","term_id","source","term_name")]),file=paste0(output_dir_gProfiler,"gostRes",".csv"))
+
+```
+### mRNA_OL_up
+```{r}
+# Directories
+  dir.create(paste0(output_dir,"gProfiler2_mRNA_OL_up","/"))
+  output_dir_gProfiler <- paste0(output_dir,"gProfiler2_mRNA_OL_up","/")
+  dir.create(paste0(graph_dir,"gProfiler2_mRNA_OL_up","/"))
+  graph_dir_gProfiler <- paste0(graph_dir,"gProfiler2_mRNA_OL_up","/")
+
+gost_df <- data.frame(mRNA_OL_up)
+colnames(gost_df)[1]<- "mouse_gene"
+
+# Translate to human genes
+gost_genes <- inner_join(gost_df,bm_hEGFR,by=c("mouse_gene"="external_gene_name"))
+
+# Save genes
+write.csv(gost_genes,file=paste0(output_dir,"ol_genes",".csv"))
+
+# gProfiler2 analysis with GO genesets
+gost_res <-
+  gost(gost_genes$hsapiens_homolog_associated_gene_name,
+    organism = "hsapiens",
+      ordered_query = F,
+      significant = T,
+      exclude_iea = T,
+      user_threshold = 0.05,
+      domain_scope = "annotated",
+      sources = "GO:BP",
+      correction_method = "g_SCS",
+      highlight = T)
+
+# Results of gProfiler2
+data.frame(gost_res$result[,c("p_value","intersection_size","term_id","source","term_name")])
+
+# Save gProfiler2 results to csv
+write.csv(data.frame(gost_res$result[,c("p_value","intersection_size","term_id","source","term_name")]),file=paste0(output_dir_gProfiler,"gostRes",".csv"))
+
+```
+
+### mRNA_Afat_down
+```{r}
+# Directories
+  dir.create(paste0(output_dir,"gProfiler2_mRNA_Afat_down","/"))
+  output_dir_gProfiler <- paste0(output_dir,"gProfiler2_mRNA_Afat_down","/")
+  dir.create(paste0(graph_dir,"gProfiler2_mRNA_Afat_down","/"))
+  graph_dir_gProfiler <- paste0(graph_dir,"gProfiler2_mRNA_Afat_down","/")
+
+gost_df <- data.frame(mRNA_Afat_down)
+colnames(gost_df)[1]<- "mouse_gene"
+
+# Translate to human genes
+gost_genes <- inner_join(gost_df,bm_hEGFR,by=c("mouse_gene"="external_gene_name"))
+
+# Save genes
+write.csv(gost_genes,file=paste0(output_dir,"ol_genes",".csv"))
+
+# gProfiler2 analysis with GO genesets
+gost_res <-
+  gost(gost_genes$hsapiens_homolog_associated_gene_name,
+    organism = "hsapiens",
+      ordered_query = F,
+      significant = T,
+      exclude_iea = T,
+      user_threshold = 0.05,
+      domain_scope = "annotated",
+      sources = "GO:BP",
+      correction_method = "g_SCS",
+      highlight = T)
+
+# Results of gProfiler2
+data.frame(gost_res$result[,c("p_value","intersection_size","term_id","source","term_name")])
+
+# Save gProfiler2 results to csv
+write.csv(data.frame(gost_res$result[,c("p_value","intersection_size","term_id","source","term_name")]),file=paste0(output_dir_gProfiler,"gostRes",".csv"))
+
+```
+
+### mRNA_Afat_up
+```{r}
+# Directories
+  dir.create(paste0(output_dir,"gProfiler2_mRNA_Afat_up","/"))
+  output_dir_gProfiler <- paste0(output_dir,"gProfiler2_mRNA_Afat_up","/")
+  dir.create(paste0(graph_dir,"gProfiler2_mRNA_Afat_up","/"))
+  graph_dir_gProfiler <- paste0(graph_dir,"gProfiler2_mRNA_Afat_up","/")
+
+gost_df <- data.frame(mRNA_Afat_up)
+colnames(gost_df)[1]<- "mouse_gene"
+
+# Translate to human genes
+gost_genes <- inner_join(gost_df,bm_hEGFR,by=c("mouse_gene"="external_gene_name"))
+
+# Save genes
+write.csv(gost_genes,file=paste0(output_dir,"ol_genes",".csv"))
+
+# gProfiler2 analysis with GO genesets
+gost_res <-
+  gost(gost_genes$hsapiens_homolog_associated_gene_name,
+    organism = "hsapiens",
+      ordered_query = F,
+      significant = T,
+      exclude_iea = T,
+      user_threshold = 0.05,
+      domain_scope = "annotated",
+      sources = "GO:BP",
+      correction_method = "g_SCS",
+      highlight = T)
+
+# Results of gProfiler2
+data.frame(gost_res$result[,c("p_value","intersection_size","term_id","source","term_name")])
+
+# Save gProfiler2 results to csv
+write.csv(data.frame(gost_res$result[,c("p_value","intersection_size","term_id","source","term_name")]),file=paste0(output_dir_gProfiler,"gostRes",".csv"))
+
+```
+
+### mRNA_Ner_down
+```{r}
+# Directories
+  dir.create(paste0(output_dir,"gProfiler2_mRNA_Ner_down","/"))
+  output_dir_gProfiler <- paste0(output_dir,"gProfiler2_mRNA_Ner_down","/")
+  dir.create(paste0(graph_dir,"gProfiler2_mRNA_Ner_down","/"))
+  graph_dir_gProfiler <- paste0(graph_dir,"gProfiler2_mRNA_Ner_down","/")
+
+gost_df <- data.frame(mRNA_Ner_down)
+colnames(gost_df)[1]<- "mouse_gene"
+
+# Translate to human genes
+gost_genes <- inner_join(gost_df,bm_hEGFR,by=c("mouse_gene"="external_gene_name"))
+
+# Save genes
+write.csv(gost_genes,file=paste0(output_dir,"ol_genes",".csv"))
+
+# gProfiler2 analysis with GO genesets
+gost_res <-
+  gost(gost_genes$hsapiens_homolog_associated_gene_name,
+    organism = "hsapiens",
+      ordered_query = F,
+      significant = T,
+      exclude_iea = T,
+      user_threshold = 0.05,
+      domain_scope = "annotated",
+      sources = "GO:BP",
+      correction_method = "g_SCS",
+      highlight = T)
+
+# Results of gProfiler2
+data.frame(gost_res$result[,c("p_value","intersection_size","term_id","source","term_name")])
+
+# Save gProfiler2 results to csv
+write.csv(data.frame(gost_res$result[,c("p_value","intersection_size","term_id","source","term_name")]),file=paste0(output_dir_gProfiler,"gostRes",".csv"))
+
+```
+
+### mRNA_Ner_up
+```{r}
+# Directories
+  dir.create(paste0(output_dir,"gProfiler2_mRNA_Ner_up","/"))
+  output_dir_gProfiler <- paste0(output_dir,"gProfiler2_mRNA_Ner_up","/")
+  dir.create(paste0(graph_dir,"gProfiler2_mRNA_Ner_up","/"))
+  graph_dir_gProfiler <- paste0(graph_dir,"gProfiler2_mRNA_Ner_up","/")
+
+gost_df <- data.frame(mRNA_Ner_up)
+colnames(gost_df)[1]<- "mouse_gene"
+
+# Translate to human genes
+gost_genes <- inner_join(gost_df,bm_hEGFR,by=c("mouse_gene"="external_gene_name"))
+
+# Save genes
+write.csv(gost_genes,file=paste0(output_dir,"ol_genes",".csv"))
+
+# gProfiler2 analysis with GO genesets
+gost_res <-
+  gost(gost_genes$hsapiens_homolog_associated_gene_name,
+    organism = "hsapiens",
+      ordered_query = F,
+      significant = T,
+      exclude_iea = T,
+      user_threshold = 0.05,
+      domain_scope = "annotated",
+      sources = "GO:BP",
+      correction_method = "g_SCS",
+      highlight = T)
+
+# Results of gProfiler2
+data.frame(gost_res$result[,c("p_value","intersection_size","term_id","source","term_name")])
+
+# Save gProfiler2 results to csv
+write.csv(data.frame(gost_res$result[,c("p_value","intersection_size","term_id","source","term_name")]),file=paste0(output_dir_gProfiler,"gostRes",".csv"))
+
+```
+
+# Session Info
+```{r}
+sessionInfo()
+```
+
+# Timing End
+```{r}
+proc.time() - ptm
+```
+
