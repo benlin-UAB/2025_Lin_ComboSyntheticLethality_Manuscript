@@ -1,17 +1,19 @@
 README
 ================
 Benjamin Lin and C Ryan Miller <br/>
-2025-06-24
+2025-06-27
 
 # Identifying and Exploiting Combinatorial Synthetic Lethality by Characterizing Adaptive Kinome Rewiring of EGFRvIII-driven Glioblastoma
 
+### Project DOI
+
 Peer-reviewed Manuscript: <br/> Pending <br/>
 
-Code for Manuscript: <br/> <https://doi.org/10.5281/zenodo.15677385>
-<br/>
+Code for Manuscript: <br/>
+[10.5281/zenodo.15677385](https://doi.org/10.5281/zenodo.15677385) <br/>
 
 Code for Docker Container: <br/>
-<https://doi.org/10.5281/zenodo.15671657> <br/>
+[10.5281/zenodo.15671657](https://doi.org/10.5281/zenodo.15671657) <br/>
 
 ## Authors
 
@@ -365,15 +367,14 @@ Quantification was performed with Salmon:
     ## ├── 07_mRNA_dynTKI.html
     ## ├── 2025_Lin_Figures.Rmd
     ## ├── 2025_Lin_Figures.html
-    ## ├── 2025_Lin_Figures_Placeholder.Rmd
-    ## ├── 2025_Lin_Figures_Placeholder.html
     ## ├── 2025_Render.R
     ## └── Data.Rproj
 
 ## Differential (DE) gene analysis
 
-Rmarkdown for DE analysis is “/Data/R_scripts/2024_Lin_ANC_DE_analysis”.
-This RMD file generates the “Graphs” and “Output” directories
+Rmarkdown for DE analysis are in the following files 02_MIB_Bl.Rmd,
+03_MIB_TMT.Rmd, and 04_RNAseq.Rmd - EDA and DE analysis for RNA-seq.
+These RMD files generate the “Graphs” and “Output” directories.
 
 ### Graphs directory
 
@@ -770,7 +771,10 @@ We recommended installing and running with administrator privileges
     Desktop](https://www.docker.com/products/docker-desktop/)
 
 2.  Download Docker image benjaminlin1/240306_rstudio_4.3.2 and pull tag
-    3.0.0
+    3.0.0. <br/> <https://github.com/benlin-UAB/240306_Docker_R-4.3.2>
+    <br/>
+    [10.5281/zenodo.15671657](https://doi.org/10.5281/zenodo.15671657)
+    <br/>
 
 3.  Clone this Github Repository
 

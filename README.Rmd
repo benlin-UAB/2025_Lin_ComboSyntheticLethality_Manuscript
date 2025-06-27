@@ -11,14 +11,16 @@ knitr::opts_chunk$set(echo = TRUE)
 
 # Identifying and Exploiting Combinatorial Synthetic Lethality by Characterizing Adaptive Kinome Rewiring of EGFRvIII-driven Glioblastoma
 
+### Project DOI
+
 Peer-reviewed Manuscript: <br/>
 Pending <br/>
 
 Code for Manuscript: <br/>
-[https://doi.org/10.5281/zenodo.15677385](https://doi.org/10.5281/zenodo.15677385) <br/>
+[10.5281/zenodo.15677385](https://doi.org/10.5281/zenodo.15677385) <br/>
 
 Code for Docker Container: <br/>
-[https://doi.org/10.5281/zenodo.15671657](https://doi.org/10.5281/zenodo.15671657) <br/>
+[10.5281/zenodo.15671657](https://doi.org/10.5281/zenodo.15671657) <br/>
 
 ## Authors
 Benjamin Lin<sup>†1,2</sup>, Abigail K. Shelton<sup>†2</sup>, Erin Smithberger<sup>2</sup>, Julia Ziebro<sup>2</sup>, Kasey R. Skinner<sup>2</sup>, Ryan E. Bash<sup>2</sup>, Richard Kirkman<sup>2</sup>, Allie Stamper<sup>2</sup>, Madison Butler<sup>3</sup>, Alex Flores<sup>4</sup>, Steven P. Angus<sup>5</sup>, Michael P. East<sup>6</sup>, Timothy F. Cloughesy<sup>7</sup>, David A. Nathanson<sup>8</sup>, Michael E. Berens<sup>9</sup>, Jann N. Sarkaria<sup>10</sup>, Zev A. Binder<sup>11</sup>, Donald M. O’Rourke<sup>11</sup>, Timothy C Howton<sup>12</sup>, Brittany N. Lasseigne<sup>12,13,4</sup>, Christopher D. Willey<sup>13,15</sup>, Gary L. Johnson<sup>6</sup>, Anita B. Hjelmeland<sup>12,13,14</sup>, Frank B. Furnari<sup>16</sup>, C. Ryan Miller<sup>*2,13,14</sup>
@@ -115,7 +117,7 @@ fs::dir_tree("/Data/R_scripts/")
 ```
 
 ## Differential (DE) gene analysis
-Rmarkdown for DE analysis is "/Data/R_scripts/2024_Lin_ANC_DE_analysis". This RMD file generates the "Graphs" and "Output" directories
+Rmarkdown for DE analysis are in the following files 02_MIB_Bl.Rmd, 03_MIB_TMT.Rmd, and 04_RNAseq.Rmd - EDA and DE analysis for RNA-seq. These RMD files generate the "Graphs" and "Output" directories.
 
 ### Graphs directory
 ```{r echo=FALSE}
@@ -141,7 +143,9 @@ We recommended installing and running with administrator privileges
 
 1. Download and install [Docker Desktop](https://www.docker.com/products/docker-desktop/)
 
-2. Download Docker image benjaminlin1/240306_rstudio_4.3.2 and pull tag 3.0.0
+2. Download Docker image benjaminlin1/240306_rstudio_4.3.2 and pull tag 3.0.0.  <br/>
+[https://github.com/benlin-UAB/240306_Docker_R-4.3.2](https://github.com/benlin-UAB/240306_Docker_R-4.3.2)  <br/>
+[10.5281/zenodo.15671657](https://doi.org/10.5281/zenodo.15671657)   <br/>
 
 3. Clone this Github Repository
 
