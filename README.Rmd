@@ -14,7 +14,7 @@ knitr::opts_chunk$set(echo = TRUE)
 ### Project DOI
 
 Peer-reviewed Manuscript: <br/>
-Pending <br/>
+[10.1186/s40478-025-02068-y](https://doi.org/10.1186/s40478-025-02068-y) <br/>
 
 Code for Manuscript: <br/>
 [10.5281/zenodo.15677385](https://doi.org/10.5281/zenodo.15677385) <br/>
@@ -64,7 +64,7 @@ Kinomic profiling of cell lines after chronic and acute EGFR TKI treatment ident
 ## Code and data availability
 
 ### Raw RNA-sequencing data is deposited at the Gene Expression Omnibus. <br/>
-GEO accession: GSE296151 <br/>
+GEO accession: [GSE296151](https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE296151) <br/>
 
 ### Code for figure generation is hosted on the following Github Pages: <br/>
 [https://benlin-uab.github.io/2025_Lin_ComboSyntheticLethality_Manuscript](https://benlin-uab.github.io/2025_Lin_ComboSyntheticLethality_Manuscript/) <br/>

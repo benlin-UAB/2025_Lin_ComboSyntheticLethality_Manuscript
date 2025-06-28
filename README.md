@@ -1,13 +1,15 @@
 README
 ================
 Benjamin Lin and C Ryan Miller <br/>
-2025-06-27
+2025-06-28
 
 # Identifying and Exploiting Combinatorial Synthetic Lethality by Characterizing Adaptive Kinome Rewiring of EGFRvIII-driven Glioblastoma
 
 ### Project DOI
 
-Peer-reviewed Manuscript: <br/> Pending <br/>
+Peer-reviewed Manuscript: <br/>
+[10.1186/s40478-025-02068-y](https://doi.org/10.1186/s40478-025-02068-y)
+<br/>
 
 Code for Manuscript: <br/>
 [10.5281/zenodo.15677385](https://doi.org/10.5281/zenodo.15677385) <br/>
@@ -106,7 +108,9 @@ generated with biorender.com.
 
 ### Raw RNA-sequencing data is deposited at the Gene Expression Omnibus. <br/>
 
-GEO accession: GSE296151 <br/>
+GEO accession:
+[GSE296151](https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE296151)
+<br/>
 
 ### Code for figure generation is hosted on the following Github Pages: <br/>
 
