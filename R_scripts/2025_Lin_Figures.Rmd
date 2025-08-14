@@ -4677,7 +4677,7 @@ Heatmap <- ComplexHeatmap::Heatmap(
   name = " ",
   column_split = cluster_vsd@colData$time_h,
   column_order = colnames(cluster_vsd)[order(cluster_vsd@colData$time_h)],
-  column_title = paste0(EGFR_TKI," 3 µM"),
+  column_title = paste0(EGFR_TKI," 1 µM"),
   row_split = heatmap_goi[row.names(mat_list),]["label"] ,
   row_gap = unit(1, "mm"),
   show_column_names = F,
